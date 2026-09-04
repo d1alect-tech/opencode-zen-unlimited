@@ -60,8 +60,10 @@ export function validateSubUrl(raw: string): URL {
 }
 
 export interface FetchOptions {
-  timeoutMs?: number;
-  fetchImpl?: typeof fetch;
+  readonly timeoutMs?: number;
+  readonly fetchImpl?: typeof fetch;
+  /** User-Agent candidates to try in order (default: browser, then clash.meta). */
+  readonly userAgents?: readonly string[];
 }
 
 const MAX_REDIRECTS = 5;
@@ -76,11 +78,12 @@ function redirectTarget(res: Response, base: URL): URL | null {
   }
 }
 
-/** GET the subscription body. Browser UA first, clashmeta fallback. Redirects re-validated per hop. */
+/** GET the subscription body. Tries each UA candidate in order, first success wins.
+ *  Redirects re-validated per hop. */
 export async function fetchSub(url: string, opts: FetchOptions = {}): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 15000;
   const impl = opts.fetchImpl ?? fetch;
-  const attempts = [BROWSER_UA, CLASHMETA_UA];
+  const attempts = opts.userAgents ?? [BROWSER_UA, CLASHMETA_UA];
   let lastError: unknown = null;
   for (const ua of attempts) {
     try {

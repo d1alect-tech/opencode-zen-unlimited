@@ -29,7 +29,9 @@ const GROUP_TYPES: ReadonlySet<string> = new Set([
 /** Minimal Clash `proxies:` section parser — no YAML dependency. */
 export function parseClashYaml(text: string): NormalizedNode[] {
   const lines = text.split(/\r?\n/);
-  const proxiesIdx = lines.findIndex((l) => /^\s*proxies\s*:/.test(l));
+  // Top-level `proxies:` only: proxy-groups entries contain a nested `proxies:`
+  // member list that must not hijack the section scan.
+  const proxiesIdx = lines.findIndex((l) => /^proxies\s*:/.test(l));
   if (proxiesIdx < 0) throw new Error("clash yaml has no proxies: section");
   const records: Array<Record<string, string>> = [];
   let current: Record<string, string> | null = null;

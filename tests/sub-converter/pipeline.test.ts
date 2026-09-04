@@ -58,6 +58,26 @@ describe("pipeline: sub content to singbox.json + relay_upstreams.json", () => {
     expect(() => convertSubContent(raw, {})).toThrow(/selector groups/i);
   });
 
+  test("clash nested proxies: inside proxy-groups does not hijack the top-level section", () => {
+    const raw = [
+      "proxy-groups:",
+      "  - name: Fastest",
+      "    type: url-test",
+      "    proxies:",
+      "      - n1",
+      "proxies:",
+      "  - name: n1",
+      "    type: ss",
+      "    server: example.com",
+      "    port: 8388",
+      "    cipher: aes-256-gcm",
+      "    password: fake-pass",
+    ].join("\n");
+    const res = convertSubContent(raw, {});
+    expect(res.outbounds.length).toBe(1);
+    expect(res.relayUpstreams[0]).toMatchObject({ server: "example.com", port: 8388 });
+  });
+
   test("SSRF guard rejects localhost/metadata/http-only", () => {
     expect(() => validateSubUrl("ftp://example.com/sub")).toThrow(/http/i);
     expect(() => validateSubUrl("http://127.0.0.1/sub")).toThrow(/blocked/i);
