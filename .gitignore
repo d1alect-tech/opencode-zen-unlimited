@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.log
+*.bak
 .env
 .env.*
 !.env.example
