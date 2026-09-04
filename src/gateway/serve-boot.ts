@@ -31,7 +31,8 @@ export function checkServeGate(
  * Boot the gateway. Applies the no-egress gate first:
  * - empty EGRESS_UPSTREAMS without --no-egress-direct -> stderr + return 1.
  * - empty with the flag -> loud warning, serve direct.
- * Never returns while serving (blocks in `serve()`); returns 1 on refusal.
+ * Resolves 1 on refusal; otherwise the returned promise never settles,
+ * so entry-point process.exit() calls cannot kill the listener.
  */
 export async function startServe(argv: readonly string[]): Promise<number> {
   const decision: EgressGateDecision = checkServeGate(process.env, argv);
@@ -63,5 +64,8 @@ export async function startServe(argv: readonly string[]): Promise<number> {
   serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
     console.log(`gateway listening on http://${HOST}:${info.port}`);
   });
-  return 0;
+  // Never settle: serve() is non-blocking, and every entry point
+  // (src/index.ts) calls process.exit(await ...) after we return —
+  // returning here would instantly kill the freshly-bound listener.
+  return new Promise<never>(() => {});
 }
