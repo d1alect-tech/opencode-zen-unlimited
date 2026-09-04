@@ -41,9 +41,17 @@ export const COMMAND_HELP: Record<Subcommand, string> = {
   doctor: ["Usage: zen doctor [--json] [--verbose]", "", "Check gateway, relay and egress health.", "", "Options:", "  --json     Machine-readable report", "  --verbose  Include per-check timings", "  -h, --help  Show this help."].join(
     "\n",
   ),
-  status: ["Usage: zen status [-h]", "", "Show pinned egress and pool status.", "", "Options:", "  -h, --help  Show this help."].join(
-    "\n",
-  ),
+  status: [
+    "Usage: zen status [--json] [--self-heal] [--verbose] [-h]",
+    "",
+    "Show singbox, relay and gateway status (pidfile + health probes).",
+    "",
+    "Options:",
+    "  --json       Machine-readable report {ok,services[]}",
+    "  --self-heal  Restart dead procs (exit 0 healed-or-healthy, 1 still-down)",
+    "  --verbose    Include last log line per service",
+    "  -h, --help  Show this help.",
+  ].join("\n"),
   setup: ["Usage: zen setup [-h]", "", "Interactive first-run setup.", "", "Options:", "  -h, --help  Show this help."].join(
     "\n",
   ),
@@ -138,6 +146,25 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli {
       help = pass2.values["help"] === true;
       rest = pass2.positionals.slice(1);
       if (pass2.values["json"] === true) rest.push("--json");
+      if (pass2.values["verbose"] === true) rest.push("--verbose");
+    } else if (subcommand === "status") {
+      // Status owns --json/--self-heal/--verbose: accept them here, re-encode
+      // into rest so the command handler can parse them.
+      const pass2 = parseArgs({
+        args,
+        strict: true,
+        allowPositionals: true,
+        options: {
+          help: { type: "boolean", short: "h", default: false },
+          json: { type: "boolean", default: false },
+          "self-heal": { type: "boolean", default: false },
+          verbose: { type: "boolean", default: false },
+        },
+      });
+      help = pass2.values["help"] === true;
+      rest = pass2.positionals.slice(1);
+      if (pass2.values["json"] === true) rest.push("--json");
+      if (pass2.values["self-heal"] === true) rest.push("--self-heal");
       if (pass2.values["verbose"] === true) rest.push("--verbose");
     } else if (subcommand === "serve") {
       // Serve owns --no-egress-direct: accept it here, re-encode into rest

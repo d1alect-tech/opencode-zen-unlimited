@@ -1,5 +1,6 @@
 import { runDoctor } from "./commands/doctor.ts";
 import { runLogs } from "./commands/logs.ts";
+import { runStatus } from "./commands/status.ts";
 import { formatHelp } from "./help.ts";
 import { parseCliArgs, type Subcommand } from "./parser.ts";
 import { startServe } from "../gateway/serve-boot.ts";
@@ -16,7 +17,7 @@ function stub(name: Subcommand): CliHandler {
 /** Dispatch table. Real command logic lands in later tasks; stubs exit 2. */
 export const DISPATCH: Record<Subcommand, CliHandler> = {
   doctor: (rest) => runDoctor(rest),
-  status: stub("status"),
+  status: (rest) => runStatus(rest),
   setup: stub("setup"),
   "add-sub": stub("add-sub"),
   logs: (rest) => runLogs(rest),
