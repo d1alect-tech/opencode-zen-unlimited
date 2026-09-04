@@ -111,6 +111,16 @@ bunx tsc --noEmit      # type gate (also: bun run lint)
 
 Start order after reboot: sing-box, relay, gateway, then OpenCode.
 
+CLI flow (`bun run src/index.ts <cmd>`): `zen setup --dry-run` previews
+the plan without changing anything, `zen setup` writes `.env` +
+`sing-box/config.json` and points at `scripts/install-scheduler.ps1`,
+`zen add-sub <url>` merges a subscription link into the sing-box config,
+`zen doctor [--json]` reports health (secrets redacted, exit 1 on any
+fail), `zen status` shows pidfile liveness (`--self-heal` restarts dead
+procs with a crash toast), `zen logs <singbox|relay|gateway>` tails logs.
+`zen serve` refuses with zero egress nodes unless `--no-egress-direct`
+(local dev only). Full exit-code matrix: `docs/e2e-verify-v0.2.0.md`.
+
 ## Verify
 
 Placeholders only. Replace tokens with env values at runtime.
