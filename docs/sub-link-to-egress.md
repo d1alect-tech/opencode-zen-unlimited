@@ -64,7 +64,11 @@ $env:SUB_URL = "<fill via env>"   # the subscription link, session-only
 
 # 2. Fetch + convert (writes singbox.json + relay_upstreams.json).
 #    Fill YOUR_HY2_PASSWORD-style placeholders at runtime from env.
-bun -e "import { convertSubUrl } from './src/sub-converter/index.ts'; const r = await convertSubUrl(process.env.SUB_URL!); await Bun.write('singbox.json', JSON.stringify(r.singboxConfig, null, 2)); await Bun.write('relay_upstreams.json', JSON.stringify(r.relayUpstreams, null, 2)); console.log(`nodes=${r.outbounds.length} dropped=${r.dropped}`);"
+#    Use a temp script file — inline `bun -e` with nested quotes breaks
+#    in PowerShell (see scripts/qa-gateway.md).
+Set-Content convert-tmp.ts 'import { convertSubUrl } from "./src/sub-converter/index.ts"; const r = await convertSubUrl(process.env.SUB_URL!); await Bun.write("singbox.json", JSON.stringify(r.singboxConfig, null, 2)); await Bun.write("relay_upstreams.json", JSON.stringify(r.relayUpstreams, null, 2)); console.log(`nodes=${r.outbounds.length} dropped=${r.dropped}`);'
+bun convert-tmp.ts
+Remove-Item convert-tmp.ts
 
 # 3. Validate the emitted config structurally (required keys per
 #    outbound type are checked by validateOutbound(); full
