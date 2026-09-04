@@ -1,4 +1,17 @@
-import type { NormalizedNode, RelayUpstream, SingboxConfig, SingboxOutbound, TemplateInput } from "./types.ts";
+import type { NormalizedNode, RelayUpstream, SingboxConfig, SingboxOutbound, TemplateInput, TlsConfig } from "./types.ts";
+
+/**
+ * Map normalized TLS to the sing-box shape: Reality becomes
+ * `tls.reality`, the uTLS fingerprint becomes `tls.utls`.
+ */
+function tlsOut(tls: TlsConfig): Record<string, unknown> {
+  const { fingerprint, reality, ...rest } = tls;
+  return {
+    ...rest,
+    ...(reality !== undefined ? { reality: { enabled: true, ...reality } } : {}),
+    ...(fingerprint !== undefined ? { utls: { enabled: true, fingerprint } } : {}),
+  };
+}
 
 /** Map one normalized node to its sing-box outbound dict. */
 export function nodeToOutbound(node: NormalizedNode, tag: string): SingboxOutbound {
@@ -12,7 +25,9 @@ export function nodeToOutbound(node: NormalizedNode, tag: string): SingboxOutbou
         server_port: node.server_port,
         uuid: node.uuid,
         ...(node.flow ? { flow: node.flow } : {}),
-        ...(node.tls ? { tls: { ...node.tls } } : {}),
+        ...(node.tls ? { tls: tlsOut(node.tls) } : {}),
+        ...(node.transport ? { transport: { ...node.transport } } : {}),
+        ...(node.packetEncoding ? { packet_encoding: node.packetEncoding } : {}),
       };
     case "vmess":
       if (!node.uuid) throw new Error("vmess node missing uuid");
@@ -24,7 +39,7 @@ export function nodeToOutbound(node: NormalizedNode, tag: string): SingboxOutbou
         uuid: node.uuid,
         security: node.security ?? "auto",
         ...(node.alterId !== undefined ? { alter_id: node.alterId } : {}),
-        ...(node.tls ? { tls: { ...node.tls } } : {}),
+        ...(node.tls ? { tls: tlsOut(node.tls) } : {}),
       };
     case "trojan":
       if (!node.password) throw new Error("trojan node missing password");
@@ -34,7 +49,7 @@ export function nodeToOutbound(node: NormalizedNode, tag: string): SingboxOutbou
         server: node.server,
         server_port: node.server_port,
         password: node.password,
-        tls: node.tls ? { ...node.tls } : { enabled: true, server_name: node.server },
+        tls: node.tls ? tlsOut(node.tls) : { enabled: true, server_name: node.server },
       };
     case "ss":
       if (!node.method || !node.password) throw new Error("ss node missing method/password");
@@ -50,13 +65,19 @@ export function nodeToOutbound(node: NormalizedNode, tag: string): SingboxOutbou
       if (!node.password) throw new Error("hysteria2 node missing password");
       const tls = node.tls ?? { enabled: true };
       const alpn = tls.alpn && tls.alpn.length > 0 ? tls.alpn : ["h3"];
+      // No utls here: sing-box v1.14 rejects uTLS usage on hysteria2
+      // at runtime (check passes, connection fails). Fingerprint stays
+      // in the normalized node for transports that support it.
+      const hyTls: Record<string, unknown> = { ...tls, enabled: true, alpn };
+      delete hyTls.fingerprint;
+      delete hyTls.reality;
       return {
         type: "hysteria2",
         tag,
         server: node.server,
         server_port: node.server_port,
         password: node.password,
-        tls: { ...tls, enabled: true, alpn },
+        tls: hyTls,
       };
     }
   }

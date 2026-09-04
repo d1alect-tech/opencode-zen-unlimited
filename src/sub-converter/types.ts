@@ -2,11 +2,26 @@
 
 export type Proto = "vless" | "vmess" | "trojan" | "ss" | "hysteria2";
 
+export interface RealityConfig {
+  public_key: string;
+  short_id: string;
+}
+
+export interface TransportConfig {
+  type: string;
+  path?: string;
+  mode?: string;
+}
+
 export interface TlsConfig {
   enabled: boolean;
   server_name?: string;
   insecure?: boolean;
   alpn?: string[];
+  /** uTLS fingerprint (clash `client-fingerprint`, vless `fp`). */
+  fingerprint?: string;
+  /** Reality handshake (clash `reality-opts`, vless `pbk`/`sid`). */
+  reality?: RealityConfig;
 }
 
 /** Normalized node record: scheme, host, port, credential refs. */
@@ -22,6 +37,10 @@ export interface NormalizedNode {
   flow?: string;
   tls?: TlsConfig;
   network?: string;
+  /** Non-TCP transport (clash `network`, vless `type`) with its opts. */
+  transport?: TransportConfig;
+  /** Packet encoding (clash `packet-encoding`, vless `packetEncoding`). */
+  packetEncoding?: string;
   rawTag?: string;
 }
 

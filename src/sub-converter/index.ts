@@ -1,7 +1,7 @@
 import { decodeBase64Text, detectFormat, splitLines } from "./detect.ts";
 import { buildSingboxConfig, nodeToOutbound, nodeToUpstream, validateOutbound } from "./emit.ts";
 import { fetchSub } from "./fetch.ts";
-import { assignTags, dedupNodes, filterNodes, normalizeNode } from "./normalize.ts";
+import { assignTags, dedupNodes, filterNodes, normalizeNode, realityFrom, transportFrom } from "./normalize.ts";
 import { parseUri } from "./parsers/index.ts";
 import type {
   ConvertOptions,
@@ -103,14 +103,25 @@ function clashProxyToNode(p: Record<string, string>): NormalizedNode {
     case "vless": {
       if (!p["uuid"]) throw new Error("clash vless proxy missing uuid");
       const tlsOn = p["tls"] === "true";
+      const network = p["network"] || undefined;
       return {
         proto: "vless",
         server,
         server_port: port,
         uuid: p["uuid"],
         flow: p["flow"] || undefined,
-        network: p["network"] || undefined,
-        tls: tlsOn ? { enabled: true, server_name: sni ?? server, insecure: insecure || undefined } : undefined,
+        network,
+        transport: transportFrom(network, p["path"] || undefined, p["mode"] || undefined),
+        packetEncoding: p["packet-encoding"] || undefined,
+        tls: tlsOn
+          ? {
+              enabled: true,
+              server_name: sni ?? server,
+              insecure: insecure || undefined,
+              fingerprint: p["client-fingerprint"] || undefined,
+              reality: realityFrom(p["public-key"], p["short-id"]),
+            }
+          : undefined,
         rawTag: p["name"],
       };
     }
@@ -124,7 +135,9 @@ function clashProxyToNode(p: Record<string, string>): NormalizedNode {
         uuid: p["uuid"],
         security: p["cipher"] || "auto",
         alterId: p["alterId"] !== undefined ? Number(p["alterId"]) : 0,
-        tls: tlsOn ? { enabled: true, server_name: sni ?? server, insecure: insecure || undefined } : undefined,
+        tls: tlsOn
+          ? { enabled: true, server_name: sni ?? server, insecure: insecure || undefined, fingerprint: p["client-fingerprint"] || undefined }
+          : undefined,
         rawTag: p["name"],
       };
     }
@@ -135,7 +148,7 @@ function clashProxyToNode(p: Record<string, string>): NormalizedNode {
         server,
         server_port: port,
         password: p["password"],
-        tls: { enabled: true, server_name: sni ?? server, insecure: insecure || undefined },
+        tls: { enabled: true, server_name: sni ?? server, insecure: insecure || undefined, fingerprint: p["client-fingerprint"] || undefined },
         rawTag: p["name"],
       };
     }
@@ -152,7 +165,7 @@ function clashProxyToNode(p: Record<string, string>): NormalizedNode {
         server,
         server_port: port,
         password: p["password"],
-        tls: { enabled: true, server_name: sni ?? server, insecure: insecure || undefined, alpn: ["h3"] },
+        tls: { enabled: true, server_name: sni ?? server, insecure: insecure || undefined, alpn: ["h3"], fingerprint: p["client-fingerprint"] || undefined },
         rawTag: p["name"],
       };
     }

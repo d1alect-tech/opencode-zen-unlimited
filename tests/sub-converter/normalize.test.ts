@@ -28,10 +28,16 @@ describe("normalize", () => {
     expect(excluded).toEqual([]);
   });
 
-  test("dedup by host+port keeps first", () => {
+  test("dedup by host+port+proto keeps first", () => {
     const a = mk({ proto: "vless", server: "example.com", server_port: 443 });
-    const b = mk({ proto: "trojan", server: "EXAMPLE.com", server_port: 443 });
+    const b = mk({ proto: "vless", server: "EXAMPLE.com", server_port: 443 });
     expect(dedupNodes([a, b])).toHaveLength(1);
+  });
+
+  test("same host+port with different protos are distinct nodes", () => {
+    const a = mk({ proto: "vless", server: "example.com", server_port: 443 });
+    const b = mk({ proto: "hysteria2", server: "EXAMPLE.com", server_port: 443 });
+    expect(dedupNodes([a, b])).toHaveLength(2);
   });
 
   test("stable tags proto-host-port with collision suffix", () => {

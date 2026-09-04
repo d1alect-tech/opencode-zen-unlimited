@@ -1,4 +1,25 @@
-import type { ConvertOptions, NormalizedNode, Proto } from "./types.ts";
+import type { ConvertOptions, NormalizedNode, Proto, RealityConfig, TransportConfig } from "./types.ts";
+
+/** Build a Reality config; undefined unless both key and id are present. */
+export function realityFrom(publicKey?: string, shortId?: string): RealityConfig | undefined {
+  if (!publicKey || !shortId) return undefined;
+  return { public_key: publicKey, short_id: shortId };
+}
+
+/** Build a transport config; undefined for tcp/none/missing networks. */
+export function transportFrom(
+  network?: string | null,
+  path?: string | null,
+  mode?: string | null,
+): TransportConfig | undefined {
+  const type = (network ?? "").trim().toLowerCase();
+  if (type === "" || type === "tcp" || type === "none") return undefined;
+  return {
+    type,
+    ...(path ? { path } : {}),
+    ...(mode ? { mode } : {}),
+  };
+}
 
 const PROTO_SET: ReadonlySet<string> = new Set(["vless", "vmess", "trojan", "ss", "hysteria2"]);
 
@@ -31,12 +52,15 @@ export function filterNodes(nodes: NormalizedNode[], opts: ConvertOptions = {}):
   });
 }
 
-/** Dedup by lowercased (host, port). Keeps the first occurrence. */
+/** Dedup by lowercased (host, port, proto). Keeps the first occurrence.
+ *  Proto is part of the key: one host:port can serve several transports
+ *  (e.g. vless-xhttp + hysteria2 twins) and each is a distinct pool member.
+ */
 export function dedupNodes(nodes: NormalizedNode[]): NormalizedNode[] {
   const seen = new Set<string>();
   const out: NormalizedNode[] = [];
   for (const n of nodes) {
-    const key = `${n.server.toLowerCase()}:${n.server_port}`;
+    const key = `${n.server.toLowerCase()}:${n.server_port}:${n.proto}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(n);

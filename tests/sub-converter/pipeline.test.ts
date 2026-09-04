@@ -53,6 +53,35 @@ describe("pipeline: sub content to singbox.json + relay_upstreams.json", () => {
     expect(res.relayUpstreams[0]).toMatchObject({ server: "example.com", port: 8388 });
   });
 
+  test("clash vless reality+xhttp keeps reality/utls/transport in the outbound", () => {
+    const raw = [
+      "proxies:",
+      "  - name: n1",
+      "    type: vless",
+      "    server: example.com",
+      "    port: 443",
+      "    network: xhttp",
+      "    udp: true",
+      "    uuid: 11111111-2222-3333-4444-555555555555",
+      "    tls: true",
+      "    servername: example.com",
+      "    reality-opts:",
+      "      public-key: PUBKEY",
+      "      short-id: SHORTID",
+      "    xhttp-opts:",
+      "      path: /xhttp",
+      "      mode: stream-up",
+      "    client-fingerprint: chrome",
+    ].join("\n");
+    const res = convertSubContent(raw, {});
+    expect(res.outbounds.length).toBe(1);
+    const ob = res.outbounds[0] as unknown as Record<string, unknown>;
+    const tls = ob["tls"] as Record<string, unknown>;
+    expect(tls["reality"]).toEqual({ enabled: true, public_key: "PUBKEY", short_id: "SHORTID" });
+    expect(tls["utls"]).toEqual({ enabled: true, fingerprint: "chrome" });
+    expect(ob["transport"]).toEqual({ type: "xhttp", path: "/xhttp", mode: "stream-up" });
+  });
+
   test("clash groups-only subscription fails with selector hint, not phantom record", () => {
     const raw = ["proxies:", "  - name: Fastest", "    type: url-test", "    proxies:", "      - n1"].join("\n");
     expect(() => convertSubContent(raw, {})).toThrow(/selector groups/i);

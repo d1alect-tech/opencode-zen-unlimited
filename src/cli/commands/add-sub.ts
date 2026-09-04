@@ -66,10 +66,12 @@ function parseAddSubArgs(rest: readonly string[]): { ok: true; parsed: ParsedAdd
   return { ok: true, parsed: { url, name } };
 }
 
-/** Dedup key: lowercased host:port when known, else the outbound tag. */
+/** Dedup key: lowercased proto/host:port when known, else the outbound tag.
+ *  Proto is part of the key: one host:port can serve several transports
+ *  (vless-xhttp + hysteria2 twins) and each is a distinct pool member. */
 function outboundKey(ob: SingboxOutbound): string {
   if (typeof ob["server"] === "string" && typeof ob["server_port"] === "number") {
-    return `${(ob["server"] as string).toLowerCase()}:${ob["server_port"] as number}`;
+    return `${ob.type}/${(ob["server"] as string).toLowerCase()}:${ob["server_port"] as number}`;
   }
   return `tag:${ob.tag}`;
 }
@@ -120,8 +122,24 @@ function isPlaceholderServer(ob: SingboxOutbound): boolean {
   return server === "" || server.includes("YOUR_");
 }
 
+/** Transports the pinned sing-box binary cannot speak (v1.14 has no xhttp).
+ *  Such nodes stay in the config (future binary upgrade) but never take pool routes. */
+const UNSPEAKABLE_TRANSPORTS: ReadonlySet<string> = new Set(["xhttp"]);
+
+function outboundTransport(ob: SingboxOutbound): string {
+  const rec = ob as unknown as Record<string, unknown>;
+  const t = rec["transport"];
+  if (typeof t === "object" && t !== null) {
+    const type = (t as { type?: unknown }).type;
+    return typeof type === "string" ? type.toLowerCase() : "";
+  }
+  return "";
+}
+
 function isRoutable(ob: SingboxOutbound): boolean {
-  return TUNNEL_TYPES.has(ob.type) && !isPlaceholderServer(ob);
+  return (
+    TUNNEL_TYPES.has(ob.type) && !isPlaceholderServer(ob) && !UNSPEAKABLE_TRANSPORTS.has(outboundTransport(ob))
+  );
 }
 
 /** Loopback socks inbound ports, sorted — the relay pool endpoints. */
@@ -175,20 +193,26 @@ function rewirePool(config: { outbounds?: unknown[]; route?: unknown; inbounds?:
     cursor += 1;
     assignedRules += 1;
   }
+  const remaining: SingboxOutbound[] = outbounds.filter((ob) => !placeholderTags.has(ob.tag));
+  config.outbounds = remaining;
+  // Dangling refs brick startup (sing-box run FATALs on missing group deps
+  // while check stays green), so prune every member tag that no longer
+  // exists — placeholders, removed nodes, anything. Refill emptied groups
+  // with the freshly routed tags so urltest never ends up with zero members.
+  const liveTags = new Set(remaining.map((ob) => ob.tag));
   const groupTargets = assignedOrdered.length > 0 ? assignedOrdered : routable.map((ob) => ob.tag);
-  for (const ob of outbounds) {
+  for (const ob of remaining) {
     if (ob.type !== "selector" && ob.type !== "urltest") continue;
     const rec = ob as unknown as Record<string, unknown>;
     if (!Array.isArray(rec["outbounds"])) continue;
-    const members = rec["outbounds"] as unknown[];
-    if (!members.some((m) => typeof m === "string" && placeholderTags.has(m as string))) continue;
-    const kept = members.filter((m) => !(typeof m === "string" && placeholderTags.has(m as string)));
+    const kept = (rec["outbounds"] as unknown[]).filter(
+      (m) => typeof m === "string" && liveTags.has(m as string),
+    );
     for (const t of groupTargets) {
       if (!kept.includes(t)) kept.push(t);
     }
     rec["outbounds"] = kept;
   }
-  config.outbounds = outbounds.filter((ob) => !placeholderTags.has(ob.tag));
   return { assignedRules, removedPlaceholders: placeholderTags.size };
 }
 
@@ -242,7 +266,13 @@ export async function runAddSub(rest: readonly string[], deps: AddSubDeps = {}):
     console.error(`error: ${lastError}`);
     return 2;
   }
-  let outbounds: SingboxOutbound[] = best.outbounds;
+  // The pinned binary rejects unknown transports at load (check + run),
+  // so unloadable nodes never merge: one bad outbound bricks the whole
+  // config. The converter stays faithful (tests pin full shapes); the CLI
+  // decides what this binary can load. A binary upgrade + rerun restores them.
+  let outbounds: SingboxOutbound[] = best.outbounds.filter(
+    (ob) => !UNSPEAKABLE_TRANSPORTS.has(outboundTransport(ob)),
+  );
 
   if (name !== undefined) {
     outbounds = outbounds.map((ob) => ({ ...ob, tag: `${name}-${ob.tag}` }));

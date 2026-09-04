@@ -207,6 +207,85 @@ describe("zen add-sub", () => {
     expect(auto.outbounds.every((t) => freshTags.includes(t))).toBe(true);
   });
 
+  test("xhttp nodes never take pool routes (pinned binary cannot speak xhttp)", async () => {
+    const sub = [
+      "proxies:",
+      "  - name: vx",
+      "    type: vless",
+      "    server: example.com",
+      "    port: 443",
+      "    network: xhttp",
+      "    uuid: 11111111-2222-3333-4444-555555555555",
+      "    tls: true",
+      "    servername: example.com",
+      "    reality-opts:",
+      "      public-key: PUB",
+      "      short-id: SID",
+      "    xhttp-opts:",
+      "      path: /xhttp",
+      "      mode: stream-up",
+      "    client-fingerprint: chrome",
+      "  - name: hy",
+      "    type: hysteria2",
+      "    server: example.com",
+      "    port: 443",
+      "    password: fake-pass",
+      "    sni: example.com",
+    ].join("\n");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        inbounds: [1081, 1082].map((port) => ({ type: "socks", tag: `socks-${port}`, listen: "127.0.0.1", listen_port: port })),
+        outbounds: [{ type: "direct", tag: "direct" }],
+        route: {
+          final: "direct",
+          rules: [1081, 1082].map((port) => ({ inbound: [`socks-${port}`], action: "route", outbound: "direct" })),
+        },
+      }),
+      "utf8",
+    );
+    expect(await runAddSub(["https://example.com/sub"], { configPath, envPath, fetchImpl: stubFetch(sub) })).toBe(0);
+    const cfg = JSON.parse(readFileSync(configPath, "utf8")) as {
+      outbounds: Array<{ tag?: string; type?: string }>;
+      route: { rules: Array<{ outbound: string }> };
+    };
+    // The xhttp node never merges (the pinned binary rejects the whole
+    // config at load when one outbound carries an unknown transport) ...
+    expect(cfg.outbounds.some((o) => o.type === "vless")).toBe(false);
+    expect(cfg.outbounds.some((o) => o.type === "hysteria2")).toBe(true);
+    expect(logs.join("\n")).toMatch(/added 1 node/);
+    // ... and every pool route lands on the speakable hy2 node.
+    expect(cfg.route.rules.length).toBe(2);
+    for (const rule of cfg.route.rules) {
+      expect(rule.outbound).toBe("hysteria2-example.com-443");
+    }
+  });
+
+  test("rewire prunes dangling group refs left by removed outbounds", async () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        inbounds: [{ type: "socks", tag: "socks-1081", listen: "127.0.0.1", listen_port: 1081 }],
+        outbounds: [
+          { type: "direct", tag: "direct" },
+          { type: "urltest", tag: "auto", outbounds: ["ghost-1", "ghost-2"] },
+        ],
+        route: { final: "direct", rules: [{ inbound: ["socks-1081"], action: "route", outbound: "ghost-1" }] },
+      }),
+      "utf8",
+    );
+    expect(await runAddSub(["https://example.com/sub"], { configPath, envPath, fetchImpl: stubFetch(SAMPLE_SUB) })).toBe(0);
+    const cfg = JSON.parse(readFileSync(configPath, "utf8")) as {
+      outbounds: Array<{ tag?: string; type?: string; outbounds?: string[] }>;
+      route: { rules: Array<{ outbound: string }> };
+    };
+    const tags = new Set(cfg.outbounds.map((o) => o.tag));
+    const auto = cfg.outbounds.find((o) => o.tag === "auto") as unknown as { outbounds: string[] };
+    expect(auto.outbounds.length).toBeGreaterThan(0);
+    for (const m of auto.outbounds) expect(tags.has(m)).toBe(true);
+    expect(cfg.route.rules[0]?.outbound).toBe("vless-example.com-443");
+  });
+
   test("sets EGRESS_UPSTREAMS from socks inbounds when empty, never overwrites", async () => {
     const mkCfg = () => ({
       inbounds: [1081, 1082].map((port) => ({

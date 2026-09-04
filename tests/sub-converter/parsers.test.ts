@@ -68,4 +68,13 @@ describe("parsers: one fixture per proto", () => {
   test("unknown scheme rejected", () => {
     expect(() => parseUri("tuic://example.com:443")).toThrow(/unsupported scheme/i);
   });
+
+  test("vless:// reality+xhttp params produce reality/fingerprint/transport", () => {
+    const n = parseUri("vless://11111111-2222-3333-4444-555555555555@example.com:443?encryption=none&security=reality&sni=example.com&fp=chrome&pbk=PUBKEY&sid=SHORTID&type=xhttp&path=%2Fxhttp&mode=stream-up#reality-node");
+    expect(n.proto).toBe("vless");
+    expect(n.tls?.enabled).toBe(true);
+    expect(n.tls?.fingerprint).toBe("chrome");
+    expect(n.tls?.reality).toEqual({ public_key: "PUBKEY", short_id: "SHORTID" });
+    expect(n.transport).toEqual({ type: "xhttp", path: "/xhttp", mode: "stream-up" });
+  });
 });

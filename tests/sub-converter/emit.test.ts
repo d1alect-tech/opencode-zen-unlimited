@@ -32,4 +32,30 @@ describe("emit: outbound dicts carry required keys", () => {
     expect(ob).toMatchObject({ type: "hysteria2", password: "p" });
     expect((ob as unknown as Record<string, unknown> & { tls: { alpn: string[] } }).tls.alpn).toEqual(["h3"]);
   });
+
+  test("vless reality+xhttp node emits tls.reality/utls and xhttp transport", () => {
+    const node = {
+      proto: "vless",
+      server: "example.com",
+      server_port: 443,
+      uuid: "u",
+      tls: {
+        enabled: true,
+        server_name: "example.com",
+        fingerprint: "chrome",
+        reality: { public_key: "pub", short_id: "sid" },
+      },
+      transport: { type: "xhttp", path: "/xhttp", mode: "stream-up" },
+    } as NormalizedNode;
+    const ob = nodeToOutbound(node, "t") as unknown as Record<string, unknown>;
+    expect((ob["tls"] as Record<string, unknown>)["reality"]).toEqual({ enabled: true, public_key: "pub", short_id: "sid" });
+    expect((ob["tls"] as Record<string, unknown>)["utls"]).toEqual({ enabled: true, fingerprint: "chrome" });
+    expect(ob["transport"]).toEqual({ type: "xhttp", path: "/xhttp", mode: "stream-up" });
+  });
+
+  test("hysteria2 omits utls (unsupported at runtime on sing-box v1.14)", () => {
+    const ob = nodeToOutbound({ proto: "hysteria2", server: "example.com", server_port: 443, password: "p", tls: { enabled: true, alpn: ["h3"], fingerprint: "chrome" } } as NormalizedNode, "t") as unknown as Record<string, unknown>;
+    expect((ob["tls"] as Record<string, unknown>)["utls"]).toBeUndefined();
+    expect((ob["tls"] as Record<string, unknown>)["fingerprint"]).toBeUndefined();
+  });
 });
