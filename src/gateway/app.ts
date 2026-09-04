@@ -24,7 +24,11 @@ import {
   type InboundShape,
   type RegistryModel,
 } from "@/registry/types";
-import { currentDispatcher } from "./dispatcher";
+import {
+  agentFor,
+  parseEgressUpstreams,
+  type EgressAgent,
+} from "./dispatcher";
 import {
   bufferedPassthrough,
   resolveRoute,
@@ -34,7 +38,8 @@ import {
   type FetchImpl,
   type UpstreamRequestInit,
 } from "./forward";
-import { fetchUpstream, toClientSseResponse } from "./sse";
+import { toClientSseResponse } from "./sse";
+import { createRotationPool, fetchWithRotation } from "./rotation";
 import { buildOpencodeProvider, renderOpencodePage } from "./dashboard";
 
 export interface ProxyLogEntry {
@@ -52,6 +57,7 @@ export interface CreateAppOptions {
   readonly models?: readonly RegistryModel[];
   readonly upstreamBase?: string;
   readonly fetchImpl?: FetchImpl;
+  readonly egresses?: readonly string[];
 }
 
 const MAX_LOG_ENTRIES = 500;
@@ -105,6 +111,13 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     options.models ?? OC_REGISTRY_ENTRY.models;
   const upstreamBase: string = options.upstreamBase ?? OC_BASE_URL;
   const fetchImpl: FetchImpl = options.fetchImpl ?? defaultFetchImpl();
+  const egresses: readonly string[] =
+    options.egresses ?? parseEgressUpstreams();
+  const pool = createRotationPool(egresses);
+  const dispatcherFor =
+    egresses.length === 0
+      ? undefined
+      : (egressUrl: string): EgressAgent => agentFor(egressUrl);
   const logs: ProxyLogEntry[] = [];
 
   const app = new Hono();
@@ -154,9 +167,17 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     );
     const route = resolveRoute(model, { inboundShape, models });
     const outgoing: string = rewriteModelBody(rawText);
-    const { res: upstream } = await fetchUpstream(`${upstreamBase}${route}`, outgoing, {
+    const { res: upstream } = await fetchWithRotation({
       fetchImpl,
-      dispatcher: currentDispatcher(),
+      url: `${upstreamBase}${route}`,
+      init: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: outgoing,
+      },
+      egresses,
+      pool,
+      dispatcherFor,
       clientSignal: c.req.raw.signal,
     });
     logs.push({
