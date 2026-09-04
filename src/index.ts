@@ -9,9 +9,17 @@
  */
 
 import { serve } from "@hono/node-server";
+import { runCli } from "./cli/dispatch.ts";
 import { createApp } from "./gateway/app.ts";
 import { createAutoparser } from "./autoparser/index.ts";
 import { OC_REGISTRY_ENTRY } from "./registry/types.ts";
+
+// CLI entry: argv[0] is bun/node in compiled output, so route on slice(2).
+// No subcommand -> legacy serve default (`bun run src/index.ts` still serves).
+const cliArgs: string[] = process.argv.slice(2);
+if (cliArgs.length > 0) {
+  process.exit(await runCli(cliArgs));
+}
 
 const PORT: number = Number.parseInt(process.env["PORT"] ?? "20128", 10) || 20128;
 const HOST = "127.0.0.1" as const;
