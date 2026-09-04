@@ -18,8 +18,7 @@
       }
     ],
     "final": "doh-11",
-    "strategy": "prefer_ipv4",
-    "domain_resolver": "doh-11"
+    "strategy": "prefer_ipv4"
   },
   "inbounds": [
     {
