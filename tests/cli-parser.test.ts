@@ -56,8 +56,8 @@ describe("cli skeleton routing (argv = process.argv.slice(2))", () => {
   });
 
   test("stubs return exit 2 (not implemented yet)", async () => {
-    // Only commands still without real logic; doctor/logs/status are implemented.
-    for (const cmd of ["setup", "add-sub"] as const) {
+    // Only commands still without real logic; doctor/logs/status/setup are implemented.
+    for (const cmd of ["add-sub"] as const) {
       expect(isSubcommand(cmd)).toBe(true);
       const code = await runCli([cmd]);
       expect(code).toBe(2);

@@ -52,12 +52,28 @@ export const COMMAND_HELP: Record<Subcommand, string> = {
     "  --verbose    Include last log line per service",
     "  -h, --help  Show this help.",
   ].join("\n"),
-  setup: ["Usage: zen setup [-h]", "", "Interactive first-run setup.", "", "Options:", "  -h, --help  Show this help."].join(
-    "\n",
-  ),
-  "add-sub": ["Usage: zen add-sub [-h]", "", "Add a subscription link.", "", "Options:", "  -h, --help  Show this help."].join(
-    "\n",
-  ),
+  setup: [
+    "Usage: zen setup [--dry-run] [--yes] [-h]",
+    "",
+    "Interactive first-run setup.",
+    "",
+    "Options:",
+    "  --dry-run  Print the plan, change nothing (exit 0).",
+    "  --yes      Proceed without prompts; overwrite existing files.",
+    "  -h, --help  Show this help.",
+  ].join("\n"),
+  "add-sub": [
+    "Usage: zen add-sub <url> [--name <prefix>] [-h]",
+    "",
+    "Add a subscription link (http/https only).",
+    "",
+    "Arguments:",
+    "  url  Subscription URL to fetch and merge into sing-box config.",
+    "",
+    "Options:",
+    "  --name <prefix>  Prefix added outbound tags (e.g. --name t9).",
+    "  -h, --help  Show this help.",
+  ].join("\n"),
   logs: [
     "Usage: zen logs <proc> [--tail N] [--follow] [-h]",
     "",
@@ -166,6 +182,39 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli {
       if (pass2.values["json"] === true) rest.push("--json");
       if (pass2.values["self-heal"] === true) rest.push("--self-heal");
       if (pass2.values["verbose"] === true) rest.push("--verbose");
+    } else if (subcommand === "setup") {
+      // Setup owns --dry-run/--yes: accept them here, re-encode into rest
+      // so the command handler can parse them.
+      const pass2 = parseArgs({
+        args,
+        strict: true,
+        allowPositionals: true,
+        options: {
+          help: { type: "boolean", short: "h", default: false },
+          "dry-run": { type: "boolean", default: false },
+          yes: { type: "boolean", default: false },
+        },
+      });
+      help = pass2.values["help"] === true;
+      rest = pass2.positionals.slice(1);
+      if (pass2.values["dry-run"] === true) rest.push("--dry-run");
+      if (pass2.values["yes"] === true) rest.push("--yes");
+    } else if (subcommand === "add-sub") {
+      // Add-sub owns --name: accept it here, re-encode into rest
+      // so the command handler sees the positional url plus --name.
+      const pass2 = parseArgs({
+        args,
+        strict: true,
+        allowPositionals: true,
+        options: {
+          help: { type: "boolean", short: "h", default: false },
+          name: { type: "string", default: undefined },
+        },
+      });
+      help = pass2.values["help"] === true;
+      rest = pass2.positionals.slice(1);
+      const name = pass2.values["name"];
+      if (typeof name === "string") rest.push("--name", name);
     } else if (subcommand === "serve") {
       // Serve owns --no-egress-direct: accept it here, re-encode into rest
       // so the boot choke point sees the explicit direct escape hatch.

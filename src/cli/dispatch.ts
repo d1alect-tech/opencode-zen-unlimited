@@ -1,4 +1,7 @@
+import { join } from "node:path";
+import { runAddSub } from "./commands/add-sub.ts";
 import { runDoctor } from "./commands/doctor.ts";
+import { runSetup } from "./commands/setup.ts";
 import { runLogs } from "./commands/logs.ts";
 import { runStatus } from "./commands/status.ts";
 import { formatHelp } from "./help.ts";
@@ -18,8 +21,12 @@ function stub(name: Subcommand): CliHandler {
 export const DISPATCH: Record<Subcommand, CliHandler> = {
   doctor: (rest) => runDoctor(rest),
   status: (rest) => runStatus(rest),
-  setup: stub("setup"),
-  "add-sub": stub("add-sub"),
+  setup: (rest) => runSetup(rest),
+  "add-sub": (rest) =>
+    runAddSub(rest, {
+      configPath: join(process.cwd(), "sing-box", "config.json"),
+      envPath: join(process.cwd(), ".env"),
+    }),
   logs: (rest) => runLogs(rest),
   serve: (rest) => startServe(rest),
 };
