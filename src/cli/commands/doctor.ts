@@ -6,6 +6,8 @@ import {
   useColor,
   type Check,
 } from "../doctor-framework.ts";
+import { BATCH_A_CHECKS } from "../doctor-checks.ts";
+import { CHECKS_B } from "../doctor-checks-b.ts";
 
 export const DOCTOR_HELP: string = [
   "Usage: zen doctor [--json] [--verbose]",
@@ -18,8 +20,8 @@ export const DOCTOR_HELP: string = [
   "  -h, --help  Show this help.",
 ].join("\n");
 
-/** Injected check list. Empty for now — real checks land in T5/T6. */
-export const DOCTOR_CHECKS: readonly Check[] = [];
+/** Live check list: batch A (T5, offline-safe) first, batch B (T6, ports/services) after. */
+export const DOCTOR_CHECKS: readonly Check[] = [...BATCH_A_CHECKS, ...CHECKS_B];
 
 export interface DoctorOptions {
   readonly json: boolean;
