@@ -135,4 +135,95 @@ describe("zen add-sub", () => {
     const tags = cfg.outbounds.map((o) => o.tag ?? "");
     expect(tags.every((t) => t.startsWith("t9-"))).toBe(true);
   });
+
+  test("prefers the UA variant with more nodes (provider UA sniffing)", async () => {
+    const preset = ["proxies:", "  - name: Fastest", "    type: url-test"].join("\n");
+    const uaFetch = (async (_u: string, init?: RequestInit) => {
+      const headers = init?.headers as unknown as Record<string, string> | undefined;
+      const ua = headers?.["user-agent"] ?? "";
+      const body = ua.includes("clash.meta") ? SAMPLE_SUB : preset;
+      return new Response(body, { status: 200 });
+    }) as unknown as typeof fetch;
+    const code = await runAddSub(["https://example.com/sub"], {
+      configPath,
+      envPath,
+      fetchImpl: uaFetch,
+    });
+    expect(code).toBe(0);
+    const cfg = JSON.parse(readFileSync(configPath, "utf8")) as {
+      outbounds: unknown[];
+    };
+    expect(cfg.outbounds.length).toBe(2);
+  });
+
+  test("rewires socks routes to fresh nodes, drops dead placeholders", async () => {
+    const placeholders = ["nl", "de", "fi", "pl", "se", "cz"].map((cc) => ({
+      type: "hysteria2",
+      tag: `${cc}-hy2`,
+      server: `YOUR_HY2_SERVER_${cc.toUpperCase()}`,
+      server_port: 443,
+      password: "YOUR_HY2_PASSWORD",
+    }));
+    const templateCfg = {
+      inbounds: [1081, 1082, 1083, 1084, 1085, 1086].map((port) => ({
+        type: "socks",
+        tag: `socks-${port}`,
+        listen: "127.0.0.1",
+        listen_port: port,
+      })),
+      outbounds: [
+        ...placeholders,
+        { type: "direct", tag: "direct" },
+        { type: "urltest", tag: "auto", outbounds: placeholders.map((p) => p.tag) },
+        { type: "selector", tag: "select", outbounds: [...placeholders.map((p) => p.tag), "auto", "direct"] },
+      ],
+      route: {
+        final: "direct",
+        rules: ["nl", "de", "fi", "pl", "se", "cz"].map((cc, i) => ({
+          inbound: [`socks-${1081 + i}`],
+          action: "route",
+          outbound: `${cc}-hy2`,
+        })),
+      },
+    };
+    writeFileSync(configPath, JSON.stringify(templateCfg, null, 2), "utf8");
+    const code = await runAddSub(["https://example.com/sub"], {
+      configPath,
+      envPath,
+      fetchImpl: stubFetch(SAMPLE_SUB),
+    });
+    expect(code).toBe(0);
+    const cfg = JSON.parse(readFileSync(configPath, "utf8")) as {
+      outbounds: Array<{ tag?: string; type?: string; server?: string }>;
+      route: { rules: Array<{ inbound: string[]; outbound: string }> };
+    };
+    expect(cfg.outbounds.some((o) => (o.server ?? "").includes("YOUR_"))).toBe(false);
+    const freshTags = ["vless-example.com-443", "trojan-example.net-8443"];
+    for (const rule of cfg.route.rules) {
+      expect(freshTags).toContain(rule.outbound);
+    }
+    expect(new Set(cfg.route.rules.map((r) => r.outbound)).size).toBe(2);
+    const auto = cfg.outbounds.find((o) => o.tag === "auto") as unknown as { outbounds: string[] };
+    expect(auto.outbounds.every((t) => freshTags.includes(t))).toBe(true);
+  });
+
+  test("sets EGRESS_UPSTREAMS from socks inbounds when empty, never overwrites", async () => {
+    const mkCfg = () => ({
+      inbounds: [1081, 1082].map((port) => ({
+        type: "socks",
+        tag: `socks-${port}`,
+        listen: "127.0.0.1",
+        listen_port: port,
+      })),
+      outbounds: [],
+      route: { final: "direct", rules: [] },
+    });
+    writeFileSync(configPath, JSON.stringify(mkCfg(), null, 2), "utf8");
+    writeFileSync(envPath, "PORT=20128\nEGRESS_UPSTREAMS=\n", "utf8");
+    expect(await runAddSub(["https://example.com/sub"], { configPath, envPath, fetchImpl: stubFetch(SAMPLE_SUB) })).toBe(0);
+    expect(readFileSync(envPath, "utf8")).toContain("EGRESS_UPSTREAMS=socks5h://127.0.0.1:1081,socks5h://127.0.0.1:1082");
+    writeFileSync(envPath, "PORT=20128\nEGRESS_UPSTREAMS=socks5h://127.0.0.1:1099\n", "utf8");
+    expect(await runAddSub(["https://example.com/sub"], { configPath, envPath, fetchImpl: stubFetch(SAMPLE_SUB) })).toBe(0);
+    expect(readFileSync(envPath, "utf8")).toContain("EGRESS_UPSTREAMS=socks5h://127.0.0.1:1099");
+  });
 });

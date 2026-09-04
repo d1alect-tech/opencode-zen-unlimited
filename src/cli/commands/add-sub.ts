@@ -6,6 +6,9 @@
  * normalize, emit — reused, never reimplemented here), appends non-duplicate
  * outbounds to the sing-box config JSON, and records the link as
  * `EGRESS_SUB_URL` in `.env`. Both files get a `.bak` backup before mutation.
+ * Providers may sniff the User-Agent and return different bodies per client
+ * (preset for browsers, full node list for clash clients), so every UA
+ * candidate is fetched and converted and the richest result wins.
  *
  * stdout never carries secrets: only the subscription host, added/total
  * counts, and a `zen doctor` pointer. Full node URLs, uuids, and passwords
@@ -20,8 +23,8 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { COMMAND_HELP } from "../parser.ts";
-import { validateSubUrl, fetchSub } from "../../sub-converter/fetch.ts";
-import { convertSubContent } from "../../sub-converter/index.ts";
+import { validateSubUrl, fetchSub, BROWSER_UA, CLASHMETA_UA } from "../../sub-converter/fetch.ts";
+import { convertSubContent, type ConvertResult } from "../../sub-converter/index.ts";
 import type { SingboxOutbound } from "../../sub-converter/types.ts";
 
 export const ADD_SUB_HELP: string = COMMAND_HELP["add-sub"];
@@ -77,22 +80,116 @@ function backup(path: string): void {
   }
 }
 
-/** Replace or append the EGRESS_SUB_URL line, preserving every other line. */
-function upsertEnvLine(envText: string, url: string): string {
+/** Replace or append a KEY=value line, preserving every other line. */
+function upsertEnvKey(envText: string, key: string, value: string): string {
   const lines = envText.split(/\r?\n/);
   let found = false;
   const out = lines.map((line) => {
-    if (/^\s*EGRESS_SUB_URL\s*=/.test(line)) {
+    if (new RegExp(`^\\s*${key}\\s*=`).test(line)) {
       found = true;
-      return `EGRESS_SUB_URL=${url}`;
+      return `${key}=${value}`;
     }
     return line;
   });
   if (!found) {
     if (out.length > 0 && (out[out.length - 1] ?? "").trim() === "") out.pop();
-    out.push(`EGRESS_SUB_URL=${url}`);
+    out.push(`${key}=${value}`);
   }
   return `${out.join("\n")}\n`;
+}
+
+/** Outbound types that carry real tunnel traffic (routable pool members). */
+const TUNNEL_TYPES: ReadonlySet<string> = new Set([
+  "vless",
+  "vmess",
+  "trojan",
+  "ss",
+  "shadowsocks",
+  "hysteria2",
+  "hy2",
+]);
+
+function outboundServer(ob: SingboxOutbound): string {
+  const rec = ob as unknown as Record<string, unknown>;
+  return typeof rec["server"] === "string" ? (rec["server"] as string) : "";
+}
+
+/** Template leftovers carry YOUR_* placeholder hosts — dead by definition. */
+function isPlaceholderServer(ob: SingboxOutbound): boolean {
+  const server = outboundServer(ob);
+  return server === "" || server.includes("YOUR_");
+}
+
+function isRoutable(ob: SingboxOutbound): boolean {
+  return TUNNEL_TYPES.has(ob.type) && !isPlaceholderServer(ob);
+}
+
+/** Loopback socks inbound ports, sorted — the relay pool endpoints. */
+function collectSocksPorts(config: { inbounds?: unknown; [key: string]: unknown }): number[] {
+  if (!Array.isArray(config.inbounds)) return [];
+  const ports: number[] = [];
+  for (const ib of config.inbounds) {
+    const rec = ib as { type?: unknown; listen_port?: unknown };
+    if (rec.type === "socks" && typeof rec.listen_port === "number") ports.push(rec.listen_port);
+  }
+  return [...new Set(ports)].sort((a, b) => a - b);
+}
+
+interface PoolRewire {
+  readonly assignedRules: number;
+  readonly removedPlaceholders: number;
+}
+
+/**
+ * Point socks route rules at distinct live nodes (round-robin over routable
+ * outbounds), drop dead YOUR_* placeholder outbounds, repoint urltest /
+ * selector groups at the assigned tags. No-op when nothing is routable.
+ * Never throws for missing sections — template shapes vary.
+ */
+function rewirePool(config: { outbounds?: unknown[]; route?: unknown; inbounds?: unknown }): PoolRewire {
+  const none = { assignedRules: 0, removedPlaceholders: 0 };
+  if (!Array.isArray(config.outbounds)) return none;
+  const outbounds = config.outbounds as SingboxOutbound[];
+  const routable = outbounds.filter(isRoutable);
+  if (routable.length === 0) return none;
+  const placeholderTags = new Set(
+    outbounds.filter((ob) => TUNNEL_TYPES.has(ob.type) && isPlaceholderServer(ob)).map((ob) => ob.tag),
+  );
+  const socksTags = new Set(
+    (Array.isArray(config.inbounds) ? (config.inbounds as unknown[]) : [])
+      .filter((ib) => (ib as { type?: unknown }).type === "socks")
+      .map((ib) => (ib as { tag?: unknown }).tag)
+      .filter((t): t is string => typeof t === "string"),
+  );
+  const route = (config.route ?? {}) as { rules?: unknown };
+  const rules = Array.isArray(route.rules) ? (route.rules as Array<Record<string, unknown>>) : [];
+  const assignedOrdered: string[] = [];
+  let cursor = 0;
+  let assignedRules = 0;
+  for (const rule of rules) {
+    const inbounds = Array.isArray(rule["inbound"]) ? (rule["inbound"] as unknown[]) : [];
+    if (!inbounds.some((t) => typeof t === "string" && socksTags.has(t as string))) continue;
+    const pick = routable[cursor % routable.length] as SingboxOutbound;
+    rule["outbound"] = pick.tag;
+    if (!assignedOrdered.includes(pick.tag)) assignedOrdered.push(pick.tag);
+    cursor += 1;
+    assignedRules += 1;
+  }
+  const groupTargets = assignedOrdered.length > 0 ? assignedOrdered : routable.map((ob) => ob.tag);
+  for (const ob of outbounds) {
+    if (ob.type !== "selector" && ob.type !== "urltest") continue;
+    const rec = ob as unknown as Record<string, unknown>;
+    if (!Array.isArray(rec["outbounds"])) continue;
+    const members = rec["outbounds"] as unknown[];
+    if (!members.some((m) => typeof m === "string" && placeholderTags.has(m as string))) continue;
+    const kept = members.filter((m) => !(typeof m === "string" && placeholderTags.has(m as string)));
+    for (const t of groupTargets) {
+      if (!kept.includes(t)) kept.push(t);
+    }
+    rec["outbounds"] = kept;
+  }
+  config.outbounds = outbounds.filter((ob) => !placeholderTags.has(ob.tag));
+  return { assignedRules, removedPlaceholders: placeholderTags.size };
 }
 
 /**
@@ -118,21 +215,34 @@ export async function runAddSub(rest: readonly string[], deps: AddSubDeps = {}):
   const envPath = deps.envPath ?? ".env";
   const fetchImpl = deps.fetchImpl ?? fetch;
 
-  let raw: string;
-  try {
-    raw = await fetchSub(url, { fetchImpl });
-  } catch (err) {
-    console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+  // Providers may sniff the User-Agent and return different bodies per client
+  // (preset for browsers, full node list for clash clients). Fetch + convert
+  // every UA candidate and keep the richest result.
+  const CANDIDATE_UAS: readonly string[] = [BROWSER_UA, CLASHMETA_UA];
+  let best: ConvertResult | undefined;
+  let lastError = "subscription fetch failed";
+  for (const ua of CANDIDATE_UAS) {
+    let raw: string;
+    try {
+      raw = await fetchSub(url, { fetchImpl, userAgents: [ua] });
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      continue;
+    }
+    try {
+      const converted = convertSubContent(raw);
+      if (best === undefined || converted.outbounds.length > best.outbounds.length) {
+        best = converted;
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  if (best === undefined) {
+    console.error(`error: ${lastError}`);
     return 2;
   }
-
-  let outbounds: SingboxOutbound[];
-  try {
-    outbounds = convertSubContent(raw).outbounds;
-  } catch (err) {
-    console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
-    return 2;
-  }
+  let outbounds: SingboxOutbound[] = best.outbounds;
 
   if (name !== undefined) {
     outbounds = outbounds.map((ob) => ({ ...ob, tag: `${name}-${ob.tag}` }));
@@ -170,14 +280,28 @@ export async function runAddSub(rest: readonly string[], deps: AddSubDeps = {}):
     envText = "";
   }
 
+  // Pool rewiring runs on the merged config (existing + fresh).
+  (config.outbounds as SingboxOutbound[]).push(...fresh);
+  const rewire = rewirePool(config);
+  envText = upsertEnvKey(envText, "EGRESS_SUB_URL", url);
+  const ports = collectSocksPorts(config);
+  let upstreamsSet = false;
+  if (ports.length > 0 && !/^\s*EGRESS_UPSTREAMS\s*=[ \t]*\S/m.test(envText)) {
+    envText = upsertEnvKey(
+      envText,
+      "EGRESS_UPSTREAMS",
+      ports.map((p) => `socks5h://127.0.0.1:${p}`).join(","),
+    );
+    upstreamsSet = true;
+  }
+
   try {
     backup(configPath);
     backup(envPath);
     mkdirSync(dirname(configPath), { recursive: true });
-    (config.outbounds as SingboxOutbound[]).push(...fresh);
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
     mkdirSync(dirname(envPath), { recursive: true });
-    writeFileSync(envPath, upsertEnvLine(envText, url), "utf8");
+    writeFileSync(envPath, envText, "utf8");
   } catch (err) {
     console.error(`error: failed to write config/env: ${err instanceof Error ? err.message : String(err)}`);
     return 2;
@@ -187,6 +311,14 @@ export async function runAddSub(rest: readonly string[], deps: AddSubDeps = {}):
   const host = new URL(url).hostname;
   const noun = fresh.length === 1 ? "node" : "nodes";
   console.log(`added ${fresh.length} ${noun} from ${host} (${total} in config).`);
+  if (rewire.assignedRules > 0) {
+    console.log(
+      `pool: ${rewire.assignedRules} socks routes → live nodes, ${rewire.removedPlaceholders} dead placeholders dropped.`,
+    );
+  }
+  if (upstreamsSet) {
+    console.log("pool: EGRESS_UPSTREAMS derived from socks inbounds.");
+  }
   console.log("next: run `zen doctor` to verify gateway, relay and egress health.");
   return 0;
 }
