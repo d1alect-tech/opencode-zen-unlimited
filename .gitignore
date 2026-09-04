@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+!.env.example
+sing-box/config.json
+coverage/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
