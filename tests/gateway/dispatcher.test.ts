@@ -43,6 +43,15 @@ describe("agentFor", () => {
     const first = agentFor("socks5://127.0.0.1:1090");
     expect(agentFor("socks5://127.0.0.1:1090")).toBe(first);
   });
+
+  test("socks5h scheme -> Socks5ProxyAgent (normalized for undici)", () => {
+    expect(agentFor("socks5h://127.0.0.1:1090")).toBeInstanceOf(Socks5ProxyAgent);
+  });
+
+  test("socks5h and socks5 spellings of one endpoint share one agent", () => {
+    const first = agentFor("socks5h://127.0.0.1:1091");
+    expect(agentFor("socks5://127.0.0.1:1091")).toBe(first);
+  });
 });
 
 describe("currentDispatcher", () => {

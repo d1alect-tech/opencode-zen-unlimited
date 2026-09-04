@@ -43,12 +43,19 @@ export function parseEgressUpstreams(
     .filter((entry: string) => entry.length > 0);
 }
 
-/** Build (or reuse the cached) agent for one egress URL. */
+/** Build (or reuse the cached) agent for one egress URL.
+ *
+ * NOTE: `socks5h://` (hostname resolved remotely) is normalized to
+ * `socks5://` because undici's `Socks5ProxyAgent` only accepts
+ * `socks5://`/`socks://` schemes. SOCKS5 resolves domain names
+ * server-side by default, so semantics are preserved.
+ */
 export function agentFor(egressUrl: string): EgressAgent {
-  const cached: EgressAgent | undefined = agents.get(egressUrl);
+  const target: string = egressUrl.replace(/^socks5h:\/\//i, "socks5://");
+  const cached: EgressAgent | undefined = agents.get(target);
   if (cached !== undefined) return cached;
   const agent: EgressAgent = isSocksScheme(egressUrl)
-    ? new Socks5ProxyAgent(egressUrl, {
+    ? new Socks5ProxyAgent(target, {
         headersTimeout: HEADERS_TIMEOUT_MS,
         bodyTimeout: BODY_TIMEOUT_MS,
       })
@@ -57,7 +64,7 @@ export function agentFor(egressUrl: string): EgressAgent {
         headersTimeout: HEADERS_TIMEOUT_MS,
         bodyTimeout: BODY_TIMEOUT_MS,
       });
-  agents.set(egressUrl, agent);
+  agents.set(target, agent);
   return agent;
 }
 
