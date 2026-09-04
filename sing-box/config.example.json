@@ -1,0 +1,218 @@
+{
+  "$schema": "https://sing-box.sagernet.org/schemas/config.json",
+  "log": {
+    "level": "info"
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "doh-11",
+        "type": "https",
+        "server": "1.1.1.1",
+        "server_port": 443,
+        "path": "/dns-query",
+        "tls": {
+          "enabled": true,
+          "server_name": "cloudflare-dns.com"
+        }
+      }
+    ],
+    "final": "doh-11",
+    "strategy": "prefer_ipv4",
+    "domain_resolver": "doh-11"
+  },
+  "inbounds": [
+    {
+      "type": "socks",
+      "tag": "socks-1081",
+      "listen": "127.0.0.1",
+      "listen_port": 1081,
+      "domain_resolver": "doh-11"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-1082",
+      "listen": "127.0.0.1",
+      "listen_port": 1082,
+      "domain_resolver": "doh-11"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-1083",
+      "listen": "127.0.0.1",
+      "listen_port": 1083,
+      "domain_resolver": "doh-11"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-1084",
+      "listen": "127.0.0.1",
+      "listen_port": 1084,
+      "domain_resolver": "doh-11"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-1085",
+      "listen": "127.0.0.1",
+      "listen_port": 1085,
+      "domain_resolver": "doh-11"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-1086",
+      "listen": "127.0.0.1",
+      "listen_port": 1086,
+      "domain_resolver": "doh-11"
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "hysteria2",
+      "tag": "nl-hy2",
+      "server": "nlp2.scvpn.app",
+      "server_port": 443,
+      "password": "YOUR_HY2_PASSWORD",
+      "tls": {
+        "enabled": true,
+        "server_name": "nlp2.scvpn.app",
+        "insecure": false,
+        "alpn": ["h3"]
+      },
+      "brutal_debug": false,
+      "bbr_profile": "standard"
+    },
+    {
+      "type": "hysteria2",
+      "tag": "de-hy2",
+      "server": "dede.scvpn.app",
+      "server_port": 443,
+      "password": "YOUR_HY2_PASSWORD",
+      "tls": {
+        "enabled": true,
+        "server_name": "dede.scvpn.app",
+        "insecure": false,
+        "alpn": ["h3"]
+      },
+      "brutal_debug": false,
+      "bbr_profile": "standard"
+    },
+    {
+      "type": "hysteria2",
+      "tag": "fi-hy2",
+      "server": "fn.scvpn.app",
+      "server_port": 443,
+      "password": "YOUR_HY2_PASSWORD",
+      "tls": {
+        "enabled": true,
+        "server_name": "fn.scvpn.app",
+        "insecure": false,
+        "alpn": ["h3"]
+      },
+      "brutal_debug": false,
+      "bbr_profile": "standard"
+    },
+    {
+      "type": "hysteria2",
+      "tag": "pl-hy2",
+      "server": "pls.scvpn.app",
+      "server_port": 443,
+      "password": "YOUR_HY2_PASSWORD",
+      "tls": {
+        "enabled": true,
+        "server_name": "pls.scvpn.app",
+        "insecure": false,
+        "alpn": ["h3"]
+      },
+      "brutal_debug": false,
+      "bbr_profile": "standard"
+    },
+    {
+      "type": "hysteria2",
+      "tag": "se-hy2",
+      "server": "swx.scvpn.app",
+      "server_port": 443,
+      "password": "YOUR_HY2_PASSWORD",
+      "tls": {
+        "enabled": true,
+        "server_name": "swx.scvpn.app",
+        "insecure": false,
+        "alpn": ["h3"]
+      },
+      "brutal_debug": false,
+      "bbr_profile": "standard"
+    },
+    {
+      "type": "hysteria2",
+      "tag": "cz-hy2",
+      "server": "cheh.scvpn.app",
+      "server_port": 443,
+      "password": "YOUR_HY2_PASSWORD",
+      "tls": {
+        "enabled": true,
+        "server_name": "cheh.scvpn.app",
+        "insecure": false,
+        "alpn": ["h3"]
+      },
+      "brutal_debug": false,
+      "bbr_profile": "standard"
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    },
+    {
+      "type": "urltest",
+      "tag": "auto",
+      "outbounds": ["nl-hy2", "de-hy2", "fi-hy2", "pl-hy2", "se-hy2", "cz-hy2"],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "1m",
+      "tolerance": 50
+    },
+    {
+      "type": "selector",
+      "tag": "select",
+      "outbounds": ["nl-hy2", "de-hy2", "fi-hy2", "pl-hy2", "se-hy2", "cz-hy2", "auto", "direct"],
+      "default": "auto"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "inbound": ["socks-1081"],
+        "action": "route",
+        "outbound": "nl-hy2"
+      },
+      {
+        "inbound": ["socks-1082"],
+        "action": "route",
+        "outbound": "de-hy2"
+      },
+      {
+        "inbound": ["socks-1083"],
+        "action": "route",
+        "outbound": "fi-hy2"
+      },
+      {
+        "inbound": ["socks-1084"],
+        "action": "route",
+        "outbound": "pl-hy2"
+      },
+      {
+        "inbound": ["socks-1085"],
+        "action": "route",
+        "outbound": "se-hy2"
+      },
+      {
+        "inbound": ["socks-1086"],
+        "action": "route",
+        "outbound": "cz-hy2"
+      }
+    ],
+    "final": "direct",
+    "default_domain_resolver": "doh-11"
+  }
+}
