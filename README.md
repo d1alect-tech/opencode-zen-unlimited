@@ -116,15 +116,19 @@ Start order after reboot: sing-box, relay, gateway, then OpenCode.
 Placeholders only. Replace tokens with env values at runtime.
 
 ```powershell
-curl.exe -s -o NUL -w "GATEWAY:%{http_code}`n" http://localhost:20128/api/health
+curl.exe -s --max-time 10 http://localhost:20128/api/health
+# -> 200 {"ok":true} (new gateway shape; the old stack returned {"status":"ok"})
+curl.exe -s --max-time 10 http://localhost:20128/v1/models
+# -> 200 dual ids per model: oc/<id> + <id> (live list from the autoparser)
 curl.exe -s --max-time 15 --proxy socks5h://127.0.0.1:1090 https://api64.ipify.org
 curl.exe -X POST http://localhost:20128/v1/responses `
   -H "Content-Type: application/json" `
   -d '{"model":"oc/muse-spark-1.3-contributor-free","input":"ping"}'
 ```
 
-Expect: gateway health 200, ipify returns an egress IP through the pool,
-responses call returns model output (not a 500 format error).
+Expect: gateway health 200 `{"ok":true}`, models 200 with dual ids,
+ipify returns an egress IP through the pool, responses call returns
+model output (not a 500 format error).
 
 Sticky pin: gateway/relay logs show pinned lines for `opencode.ai*`
 traffic. Rotation: a fresh 429 triggers a rotate line with from/to ports
