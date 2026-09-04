@@ -97,18 +97,20 @@ function portCheck(
   };
 }
 
+/** pidfile slots to try in order — status spawns `singbox`, legacy tooling `sing-box`. */
 function pidCheck(
   deps: Required<Pick<ChecksBDeps, "pidDir" | "readPidFn">>,
-  slot: string,
+  ...slots: [string, ...string[]]
 ): CheckOutcome {
-  const pid = deps.readPidFn(deps.pidDir, slot);
-  return pid === null
-    ? {
-        result: "fail",
-        detail: `${slot} pidfile missing or stale`,
-        fixHint: "start services (order: sing-box, relay, gateway) or run 'zen setup'",
-      }
-    : { result: "pass", detail: `${slot} pid ${pid} alive` };
+  for (const slot of slots) {
+    const pid = deps.readPidFn(deps.pidDir, slot);
+    if (pid !== null) return { result: "pass", detail: `${slot} pid ${pid} alive` };
+  }
+  return {
+    result: "fail",
+    detail: `${slots[0]} pidfile missing or stale`,
+    fixHint: "start services (order: sing-box, relay, gateway) or run 'zen setup'",
+  };
 }
 
 function modelIdsFrom(body: unknown): string[] {
@@ -140,7 +142,7 @@ export function createChecksB(deps: ChecksBDeps = {}): Check[] {
   const singBox: Check = {
     id: "service:sing-box",
     group: "Services",
-    run: (): CheckOutcome => pidCheck(bound, "sing-box"),
+    run: (): CheckOutcome => pidCheck(bound, "sing-box", "singbox"),
   };
   const relay: Check = {
     id: "service:relay",

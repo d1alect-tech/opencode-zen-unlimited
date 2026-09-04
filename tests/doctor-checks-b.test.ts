@@ -54,6 +54,11 @@ describe("doctor checks batch B: stale pidfile fails with fixHint", () => {
     expect((await find("service:sing-box", { readPidFn: () => 1234 }).run()).result).toBe("pass");
   });
 
+  test("service:sing-box status-spawned alias slot -> pass", async () => {
+    const readPidFn = (_dir: string, slot: string): number | null => (slot === "singbox" ? 1234 : null);
+    expect((await find("service:sing-box", { readPidFn }).run()).result).toBe("pass");
+  });
+
   test("service:gateway pid alive + /api/health ok -> pass", async () => {
     const checks = createChecksB({
       readPidFn: () => 1234,
