@@ -1,38 +1,96 @@
-# Goal 1, sub link to egress (STUB)
+# Goal 1, sub link to egress (agent instruction)
 
-Status: STUB. Pending the sub-converter task. Full content lands with
-that task. Do not implement from this stub alone.
+Status: FULL. Implemented in `src/sub-converter/`, tested in
+`tests/sub-converter/` (27 tests). Follow these steps on the user
+machine to turn a VPN subscription URL into working egress.
 
 ## Objective
 
-Turn a subscription URL into sing-box egress outbounds
-(`src/sub-converter/` to `src/singbox/`). Input is secret (env-only).
-Output is config without secrets committed.
+Convert one subscription URL (secret, env-only) into two artifacts:
 
-## Pipeline outline
+- `singbox.json`: sing-box config fragment with one outbound per node,
+  plus `selector`/`urltest` groups with `{all}` expanded and
+  `route.final` pinned to the first tag.
+- `relay_upstreams.json`: `[{ tag, server, port, proto }]` entries
+  matching the relay `UPSTREAMS` contract (`src/relay/helpers.ts`:
+  `{ host, port }` plus tag/proto).
 
-1. **fetch**: GET the subscription URL from env (`YOUR_SUB_URL`),
-   with timeout and retry. Never log the URL or body. Keep raw bytes
-   in memory only.
-2. **detect**: sniff the payload encoding (base64 blob, plain node
-   list, or single URI). Branch on content, not on file extension.
-3. **parse**: decode entries into normalized node records (scheme,
-   host, port, credentials ref, country hint). Drop malformed lines
-   with a count, fail loud on zero valid nodes.
-4. **emit**: map node records to sing-box outbounds plus :108X
-   inbounds. Write through `src/singbox/` config emit. Passwords stay
-   as `YOUR_*` placeholders in checked-in examples.
+## Pipeline (code paths)
 
-## Contract (planned)
+1. **fetch** (`src/sub-converter/fetch.ts`): `validateSubUrl()` first —
+   only `http(s)`, rejects loopback/private/link-local/metadata
+   targets and embedded credentials. Then `fetchSub()`: browser UA,
+   `clashmeta` UA fallback, redirects followed, 15 s timeout. Never
+   log the URL or body; keep raw bytes in memory only.
+2. **detect** (`src/sub-converter/detect.ts`): `detectFormat()` sniffs
+   content — `json` (sing-box/clash JSON), `clash-yaml`
+   (`proxies:` section), `base64-uri` (decodes to `://` links), else
+   `uri-list`. Branch on content, never on extension.
+3. **parse** (`src/sub-converter/parsers/`): `parseUri()` dispatches
+   by scheme to `vless` / `vmess` (base64 JSON) / `trojan` /
+   `ss` (sip002 and legacy base64) / `hysteria2` (`hy2` alias).
+   `ssr://` is REJECTED with a clear error (no sing-box mapping).
+   Unknown schemes throw. Malformed lines are counted and skipped;
+   zero valid nodes fails loud.
+4. **normalize** (`src/sub-converter/normalize.ts`): strip `[]`
+   brackets, port range-check, hysteria2 `tls.alpn: ["h3"]` default,
+   `filterNodes()` (include protos, exclude keywords on tag/host),
+   `dedupNodes()` by lowercased `(host, port)` keeping the first,
+   `assignTags()` as `{proto}-{host}-{port}` with `-2`/`-3`
+   collision suffixes.
+5. **emit** (`src/sub-converter/emit.ts` + `index.ts`):
+   `nodeToOutbound()` maps each node to its sing-box dict
+   (`vless` needs `uuid`; `trojan` needs `password`+`tls`;
+   `ss` emits `type: "shadowsocks"` with `method`+`password`;
+   `hysteria2` needs `password`+`tls.alpn ["h3"]`).
+   `validateOutbound()` checks required keys per type.
+   `buildSingboxConfig()` expands `{all}` into selector/urltest
+   `outbounds` and `{all-first}` (fallback `direct`) into
+   `route.final`. Entry points: `convertSubContent(raw, opts,
+   template)` for text, `convertSubUrl(url, opts, template)` for
+   fetch+convert.
 
-- In: one subscription URL via env, plus target country set
-  (default NL/DE/FI/PL/SE/CZ).
-- Out: N valid egress outbounds, one per country where possible,
-  wired to relay pool ports :1081+.
-- Tests first: fixture payloads per encoding in
-  `tests/sub-converter.test.ts` (RED to GREEN per `AGENTS.md`).
+Parser patterns follow Toperlock/sing-box-subscribe
+(`parsers/hysteria2.py`, `vless.py`, `tool.py` fetch/dedup) and
+sub2singbox/nichind-singbox2proxy conventions, reimplemented in
+strict TypeScript. No Python vendored. sing-box Remote-profile
+handling is out of scope (GUI concern).
 
-## Non-goals
+## Agent runbook (user machine)
 
-No gateway changes, no relay changes, no live subscription URLs in
-docs or tests. Placeholders only.
+```powershell
+# 1. Secret comes from env only. Never paste it into docs, tests, or logs.
+$env:SUB_URL = "<fill via env>"   # the subscription link, session-only
+
+# 2. Fetch + convert (writes singbox.json + relay_upstreams.json).
+#    Fill YOUR_HY2_PASSWORD-style placeholders at runtime from env.
+bun -e "import { convertSubUrl } from './src/sub-converter/index.ts'; const r = await convertSubUrl(process.env.SUB_URL!); await Bun.write('singbox.json', JSON.stringify(r.singboxConfig, null, 2)); await Bun.write('relay_upstreams.json', JSON.stringify(r.relayUpstreams, null, 2)); console.log(`nodes=${r.outbounds.length} dropped=${r.dropped}`);"
+
+# 3. Validate the emitted config structurally (required keys per
+#    outbound type are checked by validateOutbound(); full
+#    `sing-box check -c` runs in CI where sing-box is installed).
+sing-box check -c singbox.json
+
+# 4. Fill passwords: replace YOUR_* placeholders with real values
+#    from env at start time. Never commit the filled file.
+
+# 5. Start sing-box with the generated config, then relay (:1090),
+#    then gateway (:20128), then restart OpenCode (see README).
+sing-box run -c singbox.json
+```
+
+Country selection: default target set is NL/DE/FI/PL/SE/CZ. Use
+`excludeKeywords` (e.g. `["expire", "trial"]`) and `includeProtos`
+(e.g. `["hysteria2", "vless"]`) in `ConvertOptions` to narrow the
+pool before dedup.
+
+## Verify
+
+```powershell
+bun test tests/sub-converter/   # 27 tests green
+bunx tsc --noEmit                # no sub-converter errors (pre-existing
+                                 # gateway/autoparser errors are out of scope)
+```
+
+Fixtures use `example.com` and fake credentials only. No real
+subscription URLs or passwords anywhere in the repo.
