@@ -304,9 +304,15 @@ describe("fetchWithRotation fault-injection matrix", () => {
     expect(result.res.status).toBe(429);
     expect(result.res.headers.get("retry-after")).not.toBeNull();
     const body = (await result.res.json()) as {
-      error: { type: string };
+      error: { message: string; type: string };
     };
     expect(body.error.type).toBe("gateway_rate_limited");
+    expect(body.error.message).toContain("add-sub");
+    expect(body.error.message).toContain("zen add-sub");
+    expect(body.error.message).toContain("wait for reset");
+    expect(body.error.message).toContain(
+      `retry after ${result.res.headers.get("retry-after")} s`,
+    );
   });
 
   test("empty pool stays direct with a single 1:1 attempt", async () => {
