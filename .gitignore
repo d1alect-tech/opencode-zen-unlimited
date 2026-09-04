@@ -9,4 +9,5 @@ coverage/
 *.tsbuildinfo
 .DS_Store
 Thumbs.db
-.omo/ # agent scratch (subagent session notes), never project content
+# agent scratch (subagent session notes), never project content
+.omo/
