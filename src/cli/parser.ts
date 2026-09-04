@@ -37,7 +37,7 @@ export const USAGE: string = [
 ].join("\n");
 
 export const COMMAND_HELP: Record<Subcommand, string> = {
-  doctor: ["Usage: zen doctor [-h]", "", "Check gateway, relay and egress health.", "", "Options:", "  -h, --help  Show this help."].join(
+  doctor: ["Usage: zen doctor [--json] [--verbose]", "", "Check gateway, relay and egress health.", "", "Options:", "  --json     Machine-readable report", "  --verbose  Include per-check timings", "  -h, --help  Show this help."].join(
     "\n",
   ),
   status: ["Usage: zen status [-h]", "", "Show pinned egress and pool status.", "", "Options:", "  -h, --help  Show this help."].join(
@@ -49,9 +49,19 @@ export const COMMAND_HELP: Record<Subcommand, string> = {
   "add-sub": ["Usage: zen add-sub [-h]", "", "Add a subscription link.", "", "Options:", "  -h, --help  Show this help."].join(
     "\n",
   ),
-  logs: ["Usage: zen logs [-h]", "", "Tail gateway and relay logs.", "", "Options:", "  -h, --help  Show this help."].join(
-    "\n",
-  ),
+  logs: [
+    "Usage: zen logs <proc> [--tail N] [--follow] [-h]",
+    "",
+    "Tail process logs (procs: singbox, relay, gateway).",
+    "",
+    "Arguments:",
+    "  proc  One of: singbox, relay, gateway.",
+    "",
+    "Options:",
+    "  --tail N   Show the last N lines (default 50).",
+    "  --follow   Stream new lines until Ctrl-C.",
+    "  -h, --help  Show this help.",
+  ].join("\n"),
 };
 
 export function isSubcommand(value: string): value is Subcommand {
@@ -90,14 +100,34 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli {
   let help = false;
   let rest: string[] = [];
   try {
-    const pass2 = parseArgs({
-      args,
-      strict: true,
-      allowPositionals: true,
-      options: { help: { type: "boolean", short: "h", default: false } },
-    });
-    help = pass2.values["help"] === true;
-    rest = pass2.positionals.slice(1);
+    if (subcommand === "logs") {
+      // Logs owns --tail/--follow: accept them here, re-encode into rest
+      // so the command handler can parse them (pass1-style strict per command).
+      const pass2 = parseArgs({
+        args,
+        strict: true,
+        allowPositionals: true,
+        options: {
+          help: { type: "boolean", short: "h", default: false },
+          tail: { type: "string", default: undefined },
+          follow: { type: "boolean", default: false },
+        },
+      });
+      help = pass2.values["help"] === true;
+      rest = pass2.positionals.slice(1);
+      const tail = pass2.values["tail"];
+      if (typeof tail === "string") rest.push("--tail", tail);
+      if (pass2.values["follow"] === true) rest.push("--follow");
+    } else {
+      const pass2 = parseArgs({
+        args,
+        strict: true,
+        allowPositionals: true,
+        options: { help: { type: "boolean", short: "h", default: false } },
+      });
+      help = pass2.values["help"] === true;
+      rest = pass2.positionals.slice(1);
+    }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return { ok: false, exitCode: 2, message: `error: ${detail}\n${COMMAND_HELP[subcommand]}` };

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { formatHelp } from "../src/cli/help.ts";
-import { SUBCOMMANDS, isSubcommand, parseCliArgs } from "../src/cli/parser.ts";
+import { isSubcommand, parseCliArgs } from "../src/cli/parser.ts";
 import { runCli } from "../src/cli/dispatch.ts";
 
 describe("cli skeleton routing (argv = process.argv.slice(2))", () => {
@@ -56,10 +56,16 @@ describe("cli skeleton routing (argv = process.argv.slice(2))", () => {
   });
 
   test("stubs return exit 2 (not implemented yet)", async () => {
-    for (const cmd of SUBCOMMANDS) {
+    // Only commands still without real logic; doctor/logs are implemented.
+    for (const cmd of ["status", "setup", "add-sub"] as const) {
       expect(isSubcommand(cmd)).toBe(true);
       const code = await runCli([cmd]);
       expect(code).toBe(2);
     }
+  });
+
+  test("logs without proc exits 2 with usage", async () => {
+    const code = await runCli(["logs"]);
+    expect(code).toBe(2);
   });
 });

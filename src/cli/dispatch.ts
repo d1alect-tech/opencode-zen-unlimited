@@ -1,3 +1,5 @@
+import { runDoctor } from "./commands/doctor.ts";
+import { runLogs } from "./commands/logs.ts";
 import { formatHelp } from "./help.ts";
 import { parseCliArgs, type Subcommand } from "./parser.ts";
 
@@ -12,11 +14,11 @@ function stub(name: Subcommand): CliHandler {
 
 /** Dispatch table. Real command logic lands in later tasks; stubs exit 2. */
 export const DISPATCH: Record<Subcommand, CliHandler> = {
-  doctor: stub("doctor"),
+  doctor: (rest) => runDoctor(rest),
   status: stub("status"),
   setup: stub("setup"),
   "add-sub": stub("add-sub"),
-  logs: stub("logs"),
+  logs: (rest) => runLogs(rest),
 };
 
 /**
