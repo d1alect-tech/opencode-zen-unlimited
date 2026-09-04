@@ -9,6 +9,8 @@
  *   populated by the autoparser at runtime.
  * - `GET /api/health`: liveness.
  * - `GET /api/usage/proxy-logs`: watcher-compat minimal usage log.
+ * - `GET /api/dashboard/providers/opencode`: keyless provider JSON.
+ * - `GET /dashboard/providers/opencode`: minimal HTML page (no framework).
  *
  * Unlimited parallel: no semaphores, no queues. Keyless: no auth injection.
  */
@@ -33,6 +35,7 @@ import {
   type UpstreamRequestInit,
 } from "./forward";
 import { fetchUpstream, toClientSseResponse } from "./sse";
+import { buildOpencodeProvider, renderOpencodePage } from "./dashboard";
 
 export interface ProxyLogEntry {
   readonly ts: string;
@@ -122,6 +125,14 @@ export function createApp(options: CreateAppOptions = {}): Hono {
 
   app.get("/api/usage/proxy-logs", (c) =>
     c.json({ logs: [...logs], total: logs.length }, 200),
+  );
+
+  app.get("/api/dashboard/providers/opencode", (c) =>
+    c.json(buildOpencodeProvider(models), 200),
+  );
+
+  app.get("/dashboard/providers/opencode", (c) =>
+    c.html(renderOpencodePage(buildOpencodeProvider(models)), 200),
   );
 
   const handleUpstream = async (
