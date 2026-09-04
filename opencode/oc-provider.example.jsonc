@@ -1,0 +1,41 @@
+// "oc" provider block — paste into opencode.jsonc "provider": { ... }.
+// Points OpenCode at the local gateway instead of opencode.ai directly.
+// Model id MUST carry the provider prefix when calling the gateway (oc/...);
+// a bare "muse-spark-1.3-contributor-free" routes to the wrong provider (codex 401).
+// After editing opencode.jsonc: quit OpenCode/OpenChamber completely and restart
+// (config is read once at startup).
+"oc": {
+  "name": "Opencode Local",
+  "npm": "@ai-sdk/openai-compatible",
+  "api": "http://localhost:20128/v1",
+  "options": {
+    "apiKey": "YOUR_GATEWAY_API_KEY",
+    "timeout": 300000,
+    "headerTimeout": 30000,
+    "chunkTimeout": 60000
+  },
+  "models": {
+    "muse-spark-1.3-contributor-free": {
+      "name": "Muse Spark 1.3 Free",
+      "limit": {
+        "context": 1048576,
+        "output": 131072,
+        "input": 300000
+      },
+      "modalities": {
+        "input": ["text", "audio", "image", "video", "pdf"],
+        "output": ["text"]
+      },
+      "reasoning": true,
+      "tool_call": true,
+      "attachment": true,
+      "variants": {
+        "minimal": { "reasoningEffort": "minimal", "reasoningSummary": "auto", "include": ["reasoning.encrypted_content"] },
+        "low": { "reasoningEffort": "low", "reasoningSummary": "auto", "include": ["reasoning.encrypted_content"] },
+        "medium": { "reasoningEffort": "medium", "reasoningSummary": "auto", "include": ["reasoning.encrypted_content"] },
+        "high": { "reasoningEffort": "high", "reasoningSummary": "auto", "include": ["reasoning.encrypted_content"] },
+        "xhigh": { "reasoningEffort": "xhigh", "reasoningSummary": "auto", "include": ["reasoning.encrypted_content"] }
+      }
+    }
+  }
+}
