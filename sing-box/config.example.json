@@ -69,12 +69,12 @@
     {
       "type": "hysteria2",
       "tag": "nl-hy2",
-      "server": "nlp2.scvpn.app",
+      "server": "YOUR_HY2_SERVER_NL",
       "server_port": 443,
       "password": "YOUR_HY2_PASSWORD",
       "tls": {
         "enabled": true,
-        "server_name": "nlp2.scvpn.app",
+        "server_name": "YOUR_HY2_SERVER_NL",
         "insecure": false,
         "alpn": ["h3"]
       },
@@ -84,12 +84,12 @@
     {
       "type": "hysteria2",
       "tag": "de-hy2",
-      "server": "dede.scvpn.app",
+      "server": "YOUR_HY2_SERVER_DE",
       "server_port": 443,
       "password": "YOUR_HY2_PASSWORD",
       "tls": {
         "enabled": true,
-        "server_name": "dede.scvpn.app",
+        "server_name": "YOUR_HY2_SERVER_DE",
         "insecure": false,
         "alpn": ["h3"]
       },
@@ -99,12 +99,12 @@
     {
       "type": "hysteria2",
       "tag": "fi-hy2",
-      "server": "fn.scvpn.app",
+      "server": "YOUR_HY2_SERVER_FI",
       "server_port": 443,
       "password": "YOUR_HY2_PASSWORD",
       "tls": {
         "enabled": true,
-        "server_name": "fn.scvpn.app",
+        "server_name": "YOUR_HY2_SERVER_FI",
         "insecure": false,
         "alpn": ["h3"]
       },
@@ -114,12 +114,12 @@
     {
       "type": "hysteria2",
       "tag": "pl-hy2",
-      "server": "pls.scvpn.app",
+      "server": "YOUR_HY2_SERVER_PL",
       "server_port": 443,
       "password": "YOUR_HY2_PASSWORD",
       "tls": {
         "enabled": true,
-        "server_name": "pls.scvpn.app",
+        "server_name": "YOUR_HY2_SERVER_PL",
         "insecure": false,
         "alpn": ["h3"]
       },
@@ -129,12 +129,12 @@
     {
       "type": "hysteria2",
       "tag": "se-hy2",
-      "server": "swx.scvpn.app",
+      "server": "YOUR_HY2_SERVER_SE",
       "server_port": 443,
       "password": "YOUR_HY2_PASSWORD",
       "tls": {
         "enabled": true,
-        "server_name": "swx.scvpn.app",
+        "server_name": "YOUR_HY2_SERVER_SE",
         "insecure": false,
         "alpn": ["h3"]
       },
@@ -144,12 +144,12 @@
     {
       "type": "hysteria2",
       "tag": "cz-hy2",
-      "server": "cheh.scvpn.app",
+      "server": "YOUR_HY2_SERVER_CZ",
       "server_port": 443,
       "password": "YOUR_HY2_PASSWORD",
       "tls": {
         "enabled": true,
-        "server_name": "cheh.scvpn.app",
+        "server_name": "YOUR_HY2_SERVER_CZ",
         "insecure": false,
         "alpn": ["h3"]
       },

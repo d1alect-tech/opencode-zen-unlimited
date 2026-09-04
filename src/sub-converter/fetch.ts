@@ -64,20 +64,44 @@ export interface FetchOptions {
   fetchImpl?: typeof fetch;
 }
 
-/** GET the subscription body. Browser UA first, clashmeta fallback. Redirects followed. */
+const MAX_REDIRECTS = 5;
+
+function redirectTarget(res: Response, base: URL): URL | null {
+  const loc: string | null = res.headers.get("location");
+  if (loc === null || loc.trim() === "") return null;
+  try {
+    return new URL(loc, base);
+  } catch {
+    return null;
+  }
+}
+
+/** GET the subscription body. Browser UA first, clashmeta fallback. Redirects re-validated per hop. */
 export async function fetchSub(url: string, opts: FetchOptions = {}): Promise<string> {
-  const target = validateSubUrl(url);
   const timeoutMs = opts.timeoutMs ?? 15000;
   const impl = opts.fetchImpl ?? fetch;
   const attempts = [BROWSER_UA, CLASHMETA_UA];
   let lastError: unknown = null;
   for (const ua of attempts) {
     try {
-      const res = await impl(target.toString(), {
-        headers: { "user-agent": ua, accept: "*/*" },
-        redirect: "follow",
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+      let target: URL = validateSubUrl(url);
+      let res: Response | null = null;
+      for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+        const step: Response = await impl(target.toString(), {
+          headers: { "user-agent": ua, accept: "*/*" },
+          redirect: "manual",
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (step.status >= 300 && step.status < 400) {
+          const next: URL | null = redirectTarget(step, target);
+          if (next === null) throw new Error("subscription fetch failed: bad redirect location");
+          target = validateSubUrl(next.toString());
+          continue;
+        }
+        res = step;
+        break;
+      }
+      if (res === null) throw new Error("subscription fetch failed: too many redirects");
       if (!res.ok) {
         lastError = new Error(`subscription fetch failed: http ${res.status}`);
         continue;

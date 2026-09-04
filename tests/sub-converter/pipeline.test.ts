@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { convertSubContent } from "../../src/sub-converter/index.ts";
-import { validateSubUrl } from "../../src/sub-converter/fetch.ts";
+import { fetchSub, validateSubUrl } from "../../src/sub-converter/fetch.ts";
 
 describe("pipeline: sub content to singbox.json + relay_upstreams.json", () => {
   test("mixed uri list converts, dedups, merges template {all}", () => {
@@ -40,5 +40,26 @@ describe("pipeline: sub content to singbox.json + relay_upstreams.json", () => {
     expect(() => validateSubUrl("http://localhost/sub")).toThrow(/blocked/i);
     expect(() => validateSubUrl("http://169.254.169.254/latest")).toThrow(/blocked/i);
     expect(validateSubUrl("https://example.com/sub").hostname).toBe("example.com");
+  });
+
+  test("redirect to loopback is rejected per-hop", async () => {
+    const fetchImpl = (async (u: string) => {
+      if (u === "https://example.com/sub") {
+        return new Response("", { status: 302, headers: { location: "http://127.0.0.1/evil" } });
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    }) as typeof fetch;
+    await expect(fetchSub("https://example.com/sub", { fetchImpl })).rejects.toThrow(/blocked/i);
+  });
+
+  test("redirect to public https is followed", async () => {
+    const fetchImpl = (async (u: string) => {
+      if (u === "https://example.com/sub") {
+        return new Response("", { status: 302, headers: { location: "https://cdn.example.com/sub2" } });
+      }
+      if (u === "https://cdn.example.com/sub2") return new Response("ok-body", { status: 200 });
+      throw new Error(`unexpected fetch: ${u}`);
+    }) as typeof fetch;
+    await expect(fetchSub("https://example.com/sub", { fetchImpl })).resolves.toBe("ok-body");
   });
 });
