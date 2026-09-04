@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 
-export const SUBCOMMANDS = ["doctor", "status", "setup", "add-sub", "logs"] as const;
+export const SUBCOMMANDS = ["doctor", "status", "setup", "add-sub", "logs", "serve"] as const;
 
 export type Subcommand = (typeof SUBCOMMANDS)[number];
 
@@ -29,6 +29,7 @@ export const USAGE: string = [
   "  setup     Interactive first-run setup",
   "  add-sub   Add a subscription link",
   "  logs      Tail gateway and relay logs",
+  "  serve     Start the gateway (refuses with zero egress nodes)",
   "",
   "Options:",
   "  -h, --help  Show help for a command",
@@ -62,6 +63,9 @@ export const COMMAND_HELP: Record<Subcommand, string> = {
     "  --follow   Stream new lines until Ctrl-C.",
     "  -h, --help  Show this help.",
   ].join("\n"),
+  serve: ["Usage: zen serve [--no-egress-direct] [-h]", "", "Start the gateway. Refuses when EGRESS_UPSTREAMS is empty", "unless --no-egress-direct is passed (local dev only, direct traffic).", "", "Options:", "  --no-egress-direct  Serve direct without egress nodes (local dev only).", "  -h, --help  Show this help."].join(
+    "\n",
+  ),
 };
 
 export function isSubcommand(value: string): value is Subcommand {
@@ -118,6 +122,38 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli {
       const tail = pass2.values["tail"];
       if (typeof tail === "string") rest.push("--tail", tail);
       if (pass2.values["follow"] === true) rest.push("--follow");
+    } else if (subcommand === "doctor") {
+      // Doctor owns --json/--verbose: accept them here, re-encode into rest
+      // so the command handler can parse them (pass1-style strict per command).
+      const pass2 = parseArgs({
+        args,
+        strict: true,
+        allowPositionals: true,
+        options: {
+          help: { type: "boolean", short: "h", default: false },
+          json: { type: "boolean", default: false },
+          verbose: { type: "boolean", default: false },
+        },
+      });
+      help = pass2.values["help"] === true;
+      rest = pass2.positionals.slice(1);
+      if (pass2.values["json"] === true) rest.push("--json");
+      if (pass2.values["verbose"] === true) rest.push("--verbose");
+    } else if (subcommand === "serve") {
+      // Serve owns --no-egress-direct: accept it here, re-encode into rest
+      // so the boot choke point sees the explicit direct escape hatch.
+      const pass2 = parseArgs({
+        args,
+        strict: true,
+        allowPositionals: true,
+        options: {
+          help: { type: "boolean", short: "h", default: false },
+          "no-egress-direct": { type: "boolean", default: false },
+        },
+      });
+      help = pass2.values["help"] === true;
+      rest = pass2.positionals.slice(1);
+      if (pass2.values["no-egress-direct"] === true) rest.push("--no-egress-direct");
     } else {
       const pass2 = parseArgs({
         args,

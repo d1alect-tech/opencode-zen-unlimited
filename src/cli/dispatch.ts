@@ -2,6 +2,7 @@ import { runDoctor } from "./commands/doctor.ts";
 import { runLogs } from "./commands/logs.ts";
 import { formatHelp } from "./help.ts";
 import { parseCliArgs, type Subcommand } from "./parser.ts";
+import { startServe } from "../gateway/serve-boot.ts";
 
 export type CliHandler = (rest: readonly string[]) => number | Promise<number>;
 
@@ -19,6 +20,7 @@ export const DISPATCH: Record<Subcommand, CliHandler> = {
   setup: stub("setup"),
   "add-sub": stub("add-sub"),
   logs: (rest) => runLogs(rest),
+  serve: (rest) => startServe(rest),
 };
 
 /**
