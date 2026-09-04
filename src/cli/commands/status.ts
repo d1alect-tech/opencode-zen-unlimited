@@ -106,14 +106,19 @@ async function fetchWithTimeout(
 /** Default spawn specs: the same entry points the stack boots from. */
 function defaultSpecs(): Record<StatusService, ServiceSpec> {
   const here = fileURLToPath(new URL(".", import.meta.url));
+  const root = join(here, "..", "..", "..");
   const entry = join(here, "..", "..", "index.ts");
   const relayEntry = join(here, "..", "..", "relay", "rr-socks.mjs");
+  // Prefer the project-local binary (./bin, doctor batch A convention);
+  // fall back to PATH for installs that provide sing-box globally.
+  const exe = process.platform === "win32" ? "sing-box.exe" : "sing-box";
+  const localBin = join(root, "bin", exe);
   return {
     gateway: { cmd: "bun", args: ["run", entry, "serve"] },
     relay: { cmd: "bun", args: [relayEntry] },
     singbox: {
-      cmd: "sing-box",
-      args: ["run", "-c", process.env["SINGBOX_CONFIG"] ?? "config.json"],
+      cmd: existsSync(localBin) ? localBin : "sing-box",
+      args: ["run", "-c", process.env["SINGBOX_CONFIG"] ?? join(root, "sing-box", "config.json")],
     },
   };
 }
