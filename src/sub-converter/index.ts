@@ -14,6 +14,18 @@ import type {
 
 export type { ConvertOptions, ConvertResult } from "./types.ts";
 
+/** Proxy `type:` values that are selectors/groups, not servers — skipped, not converted. */
+const GROUP_TYPES: ReadonlySet<string> = new Set([
+  "select",
+  "url-test",
+  "fallback",
+  "load-balance",
+  "relay",
+  "direct",
+  "reject",
+  "pass",
+]);
+
 /** Minimal Clash `proxies:` section parser — no YAML dependency. */
 export function parseClashYaml(text: string): NormalizedNode[] {
   const lines = text.split(/\r?\n/);
@@ -21,15 +33,34 @@ export function parseClashYaml(text: string): NormalizedNode[] {
   if (proxiesIdx < 0) throw new Error("clash yaml has no proxies: section");
   const records: Array<Record<string, string>> = [];
   let current: Record<string, string> | null = null;
+  let baseIndent = -1;
+  let skippedGroups = 0;
+  const closeRecord = (): void => {
+    if (current === null) return;
+    if (Object.keys(current).length === 0) {
+      current = null; // parser artifact (nested list item) — drop silently
+      return;
+    }
+    const type = (current["type"] ?? "").toLowerCase();
+    if (GROUP_TYPES.has(type)) {
+      skippedGroups += 1; // selector group, not a server — drop
+    } else {
+      records.push(current);
+    }
+    current = null;
+  };
   for (const line of lines.slice(proxiesIdx + 1)) {
     if (/^\S/.test(line) && line.trim() !== "" && !line.startsWith(" ")) {
       break; // next top-level section
     }
-    const itemStart = line.match(/^\s*-\s*(.*)$/);
+    const itemStart = line.match(/^(\s*)-\s*(.*)$/);
     if (itemStart) {
+      const indent = (itemStart[1] ?? "").length;
+      if (baseIndent < 0) baseIndent = indent;
+      if (indent !== baseIndent) continue; // nested list (alpn, group members) — not a record
+      closeRecord();
       current = {};
-      records.push(current);
-      const rest = (itemStart[1] ?? "").trim();
+      const rest = (itemStart[2] ?? "").trim();
       if (rest !== "") {
         const kv = rest.match(/^([\w-]+)\s*:\s*(.*)$/);
         if (kv) current[kv[1] as string] = stripQuotes((kv[2] ?? "").trim());
@@ -40,6 +71,12 @@ export function parseClashYaml(text: string): NormalizedNode[] {
       const kv = line.match(/^\s+([\w-]+)\s*:\s*(.*)$/);
       if (kv) current[kv[1] as string] = stripQuotes((kv[2] ?? "").trim());
     }
+  }
+  closeRecord();
+  if (records.length === 0 && skippedGroups > 0) {
+    throw new Error(
+      `clash yaml has only selector groups (${skippedGroups} skipped: select/url-test/…), no server nodes — this looks like a ClashVerge preset, not a node subscription`,
+    );
   }
   return records.map(clashProxyToNode);
 }

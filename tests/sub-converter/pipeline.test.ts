@@ -34,6 +34,30 @@ describe("pipeline: sub content to singbox.json + relay_upstreams.json", () => {
     expect(() => convertSubContent("ssr://example.com:1#x", {})).toThrow(/no valid nodes/i);
   });
 
+  test("clash selector groups + nested name lists are skipped, server nodes convert", () => {
+    const raw = [
+      "proxies:",
+      "  - name: Fastest",
+      "    type: url-test",
+      "    proxies:",
+      "      - n1",
+      "  - name: n1",
+      "    type: ss",
+      "    server: example.com",
+      "    port: 8388",
+      "    cipher: aes-256-gcm",
+      "    password: fake-pass",
+    ].join("\n");
+    const res = convertSubContent(raw, {});
+    expect(res.outbounds.length).toBe(1);
+    expect(res.relayUpstreams[0]).toMatchObject({ server: "example.com", port: 8388 });
+  });
+
+  test("clash groups-only subscription fails with selector hint, not phantom record", () => {
+    const raw = ["proxies:", "  - name: Fastest", "    type: url-test", "    proxies:", "      - n1"].join("\n");
+    expect(() => convertSubContent(raw, {})).toThrow(/selector groups/i);
+  });
+
   test("SSRF guard rejects localhost/metadata/http-only", () => {
     expect(() => validateSubUrl("ftp://example.com/sub")).toThrow(/http/i);
     expect(() => validateSubUrl("http://127.0.0.1/sub")).toThrow(/blocked/i);
