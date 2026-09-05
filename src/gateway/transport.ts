@@ -19,8 +19,28 @@
 import fetch from "node-fetch";
 import type { FetchImpl, UpstreamRequestInit } from "./forward";
 
-/** Default body inactivity budget (see module doc). */
-export const STALL_TIMEOUT_MS = 15_000;
+/**
+ * Default body inactivity budget (see module doc). Sized for long
+generations: big-file edits with reasoning pauses go silent for tens of
+ * seconds mid-stream; cutting them kills the client attempt and forces a
+ * from-scratch retry. Truly dead egresses still get benched on fire.
+ */
+export const STALL_TIMEOUT_MS = 120_000;
+
+/**
+ * Resolve the stall budget from env (`STALL_TIMEOUT_MS`, milliseconds).
+ * Unset, non-integer, or non-positive values fall back to the default,
+ * so an empty `.env` key means stock behavior.
+ */
+export function resolveStallTimeoutMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw: string | undefined = env["STALL_TIMEOUT_MS"];
+  if (raw === undefined) return STALL_TIMEOUT_MS;
+  const parsed: number = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) return STALL_TIMEOUT_MS;
+  return parsed;
+}
 
 export interface NodeFetchImplOptions {
   readonly stallTimeoutMs?: number;

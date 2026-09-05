@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
   createNodeFetchImpl,
+  resolveStallTimeoutMs,
   STALL_TIMEOUT_MS,
   type NodeFetchImplOptions,
 } from "@/gateway/transport";
@@ -47,6 +48,29 @@ const fastOptions: NodeFetchImplOptions = { stallTimeoutMs: 10_000 };
 
 afterEach(() => {
   expect(STALL_TIMEOUT_MS).toBeGreaterThanOrEqual(10_000);
+});
+
+describe("stall budget", () => {
+  test("default fits long generations with reasoning pauses", () => {
+    expect(STALL_TIMEOUT_MS).toBe(120_000);
+  });
+
+  test("env override tunes the budget without code change", () => {
+    expect(resolveStallTimeoutMs({})).toBe(STALL_TIMEOUT_MS);
+    expect(resolveStallTimeoutMs({ STALL_TIMEOUT_MS: "45000" })).toBe(45_000);
+  });
+
+  test("garbage env falls back to the default", () => {
+    expect(resolveStallTimeoutMs({ STALL_TIMEOUT_MS: "" })).toBe(
+      STALL_TIMEOUT_MS,
+    );
+    expect(resolveStallTimeoutMs({ STALL_TIMEOUT_MS: "soon" })).toBe(
+      STALL_TIMEOUT_MS,
+    );
+    expect(resolveStallTimeoutMs({ STALL_TIMEOUT_MS: "-5" })).toBe(
+      STALL_TIMEOUT_MS,
+    );
+  });
 });
 
 describe("createNodeFetchImpl", () => {

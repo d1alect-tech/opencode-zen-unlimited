@@ -16,7 +16,7 @@
  */
 
 import { Hono, type Context } from "hono";
-import { createNodeFetchImpl } from "./transport";
+import { createNodeFetchImpl, resolveStallTimeoutMs } from "./transport";
 import {
   OC_BASE_URL,
   OC_REGISTRY_ENTRY,
@@ -63,7 +63,9 @@ export interface CreateAppOptions {
 const MAX_LOG_ENTRIES = 500;
 
 function defaultFetchImpl(): FetchImpl {
-  return createNodeFetchImpl();
+  return createNodeFetchImpl({
+    stallTimeoutMs: resolveStallTimeoutMs(),
+  });
 }
 
 function parseModel(rawText: string): string {
