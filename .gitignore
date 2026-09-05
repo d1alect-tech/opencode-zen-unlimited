@@ -14,5 +14,5 @@ Thumbs.db
 .omo/
 # local sing-box binary (downloaded, not built)
 bin/
-# generated scheduler wrappers (written by install-scheduler.ps1, hands off)
+# generated scheduler wrappers (written by install-zen-stack.ps1, hands off)
 scripts/oc-*-run.ps1
