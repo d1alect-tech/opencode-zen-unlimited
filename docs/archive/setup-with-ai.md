@@ -1,3 +1,12 @@
+> **SUPERSEDED — archived 2026-09-05. Do not follow this guide.**
+>
+> Stale: `convertSubUrl` temp-script flow writing `singbox.json` + `relay_upstreams.json`, provider via nonexistent `opencode/oc-provider.example.jsonc`.
+> Current: `zen add-sub <url>` merges subscription into `sing-box/config.json` (+`.bak`) with pool rewire (+`.env`); provider block via `docs/agents/configure-oc-provider.md` (inline block).
+>
+> Original body preserved below for history.
+>
+> ---
+
 # Установка через ИИ-агента (для пользователя)
 
 Вся установка строится так: ты копируешь **один текст** ниже и отправляешь
