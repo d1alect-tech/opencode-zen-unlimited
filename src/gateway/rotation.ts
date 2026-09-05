@@ -10,8 +10,11 @@
  *   un-benched egress, retry. At most MAX_ATTEMPTS total tries.
  * - 401/403 -> bench the egress (default window), rotate onward. The same
  *   egress is never retried while benched.
- * - 5xx / network timeout (fetch rejects) -> rotate to the next egress
- *   WITHOUT benching (transient, not quota), retry.
+ * - 5xx -> rotate to the next egress WITHOUT benching (transient,
+ *   not quota), retry.
+ * - Network timeout / stall (fetch rejects, client did not abort) -> bench
+ *   the egress (default window, no Retry-After exists) and rotate onward.
+ *   A body-stalled egress must not be re-pinned while it recovers.
  * - Other 4xx -> return 1:1 immediately, no retry.
  *
  * Error mapping is 1:1: upstream status + body pass through, `x-request-id`
@@ -28,6 +31,7 @@
  */
 
 import type { EgressAgent } from "./dispatcher";
+import { bridgeToNativeBody } from "./forward";
 import type { FetchImpl, UpstreamRequestInit } from "./forward";
 
 /** Default bench window applied on 429/401/403 without usable Retry-After. */
@@ -204,7 +208,7 @@ function withRetryAfterFallback(
   if (res.headers.get("retry-after") !== null) return res;
   const headers = new Headers(res.headers);
   headers.set("retry-after", String(retryAfterSec));
-  return new Response(res.body, {
+  return new Response(bridgeToNativeBody(res.body), {
     status: res.status,
     statusText: res.statusText,
     headers,
@@ -280,6 +284,10 @@ export async function fetchWithRotation(
       });
     } catch (err) {
       if (upstreamController.signal.aborted) throw err;
+      pool.bench(
+        egress,
+        benchDurationMs(0, null, now(), random),
+      );
       attempts += 1;
       pool.rotate();
       if (attempts >= maxAttempts) throw err;

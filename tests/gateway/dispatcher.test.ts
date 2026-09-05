@@ -1,19 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { getGlobalDispatcher } from "undici";
-import ProxyAgent from "undici/lib/dispatcher/proxy-agent.js";
-import Socks5ProxyAgent from "undici/lib/dispatcher/socks5-proxy-agent.js";
+import { SocksProxyAgent } from "socks-proxy-agent";
 import {
   agentFor,
-  BODY_TIMEOUT_MS,
   closeDispatchers,
   currentDispatcher,
-  HEADERS_TIMEOUT_MS,
   parseEgressUpstreams,
 } from "@/gateway/dispatcher";
 
 afterEach(() => {
   delete process.env["EGRESS_UPSTREAMS"];
-  void closeDispatchers();
+  closeDispatchers();
 });
 
 describe("parseEgressUpstreams", () => {
@@ -31,12 +27,14 @@ describe("parseEgressUpstreams", () => {
 });
 
 describe("agentFor", () => {
-  test("socks5 scheme -> Socks5ProxyAgent", () => {
-    expect(agentFor("socks5://127.0.0.1:1090")).toBeInstanceOf(Socks5ProxyAgent);
+  test("socks5 scheme -> SocksProxyAgent", () => {
+    expect(agentFor("socks5://127.0.0.1:1090")).toBeInstanceOf(SocksProxyAgent);
   });
 
-  test("http scheme -> ProxyAgent", () => {
-    expect(agentFor("http://127.0.0.1:8080")).toBeInstanceOf(ProxyAgent);
+  test("socks5h scheme -> SocksProxyAgent (normalized)", () => {
+    expect(agentFor("socks5h://127.0.0.1:1090")).toBeInstanceOf(
+      SocksProxyAgent,
+    );
   });
 
   test("agents are cached per egress url", () => {
@@ -44,32 +42,25 @@ describe("agentFor", () => {
     expect(agentFor("socks5://127.0.0.1:1090")).toBe(first);
   });
 
-  test("socks5h scheme -> Socks5ProxyAgent (normalized for undici)", () => {
-    expect(agentFor("socks5h://127.0.0.1:1090")).toBeInstanceOf(Socks5ProxyAgent);
-  });
-
   test("socks5h and socks5 spellings of one endpoint share one agent", () => {
     const first = agentFor("socks5h://127.0.0.1:1091");
     expect(agentFor("socks5://127.0.0.1:1091")).toBe(first);
   });
+
+  test("non-proxy scheme throws a usage error", () => {
+    expect(() => agentFor("vless://user@example.com:443")).toThrow(
+      /SOCKS proxy URL/,
+    );
+  });
 });
 
 describe("currentDispatcher", () => {
-  test("no env -> undefined (direct, global dispatcher untouched)", () => {
+  test("no env -> undefined (direct)", () => {
     expect(currentDispatcher()).toBeUndefined();
-    const cached = agentFor("socks5://127.0.0.1:1090");
-    expect(getGlobalDispatcher()).not.toBe(cached);
   });
 
   test("EGRESS_UPSTREAMS single egress -> that agent", () => {
     process.env["EGRESS_UPSTREAMS"] = "socks5://127.0.0.1:1090";
     expect(currentDispatcher()).toBe(agentFor("socks5://127.0.0.1:1090"));
-  });
-});
-
-describe("timeouts", () => {
-  test("headersTimeout is 15s and streams get 30s+ body budget", () => {
-    expect(HEADERS_TIMEOUT_MS).toBe(15_000);
-    expect(BODY_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000);
   });
 });

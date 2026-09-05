@@ -19,6 +19,8 @@
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "hono": "^4.7.11",
+    "node-fetch": "^3.3.2",
+    "socks-proxy-agent": "^10.1.0",
     "undici": "^7.4.1"
   },
   "devDependencies": {

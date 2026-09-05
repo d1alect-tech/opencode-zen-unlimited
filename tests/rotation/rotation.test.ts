@@ -236,6 +236,50 @@ describe("fetchWithRotation fault-injection matrix", () => {
     expect(result.attempts).toBe(2);
   });
 
+  test("fetch rejection benches the stalled egress", async () => {
+    const nowMs = 2_000_000;
+    const { seen, dispatcherFor } = trackingDispatcher();
+    const pool = createRotationPool([EGRESS_A, EGRESS_B], () => nowMs);
+    const seq = scriptFetch([
+      new Error("body timeout"),
+      jsonResponse({ output: "ok" }, 200),
+    ]);
+    const result = await fetchWithRotation({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A, EGRESS_B],
+      pool,
+      dispatcherFor,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    expect(result.res.status).toBe(200);
+    expect(result.attempts).toBe(2);
+    expect(seen).toEqual([EGRESS_A, EGRESS_B]);
+    expect(pool.benchedUntil(EGRESS_A)).toBe(nowMs + DEFAULT_BENCH_MS);
+    expect(pool.benchedUntil(EGRESS_B)).toBe(0);
+  });
+
+  test("client abort surfaces without benching", async () => {
+    const nowMs = 3_000_000;
+    const pool = createRotationPool([EGRESS_A, EGRESS_B], () => nowMs);
+    const seq = scriptFetch([new Error("aborted")]);
+    const promise = fetchWithRotation({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A, EGRESS_B],
+      pool,
+      clientSignal: AbortSignal.abort(),
+      now: () => nowMs,
+      random: () => 0,
+    });
+    await expect(promise).rejects.toThrow();
+    expect(pool.benchedUntil(EGRESS_A)).toBe(0);
+    expect(pool.benchedUntil(EGRESS_B)).toBe(0);
+  });
+
   test("other 4xx map 1:1 with no retry", async () => {
     const pool = createRotationPool([EGRESS_A, EGRESS_B]);
     const seq = scriptFetch([jsonResponse({ error: "bad" }, 400)]);

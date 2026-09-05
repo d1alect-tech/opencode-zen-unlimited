@@ -16,7 +16,7 @@
  */
 
 import { Hono, type Context } from "hono";
-import { fetch as undiciFetch } from "undici/index.js";
+import { createNodeFetchImpl } from "./transport";
 import {
   OC_BASE_URL,
   OC_REGISTRY_ENTRY,
@@ -62,35 +62,8 @@ export interface CreateAppOptions {
 
 const MAX_LOG_ENTRIES = 500;
 
-/** Normalize `HeadersInit` to the record shape the undici fetch takes. */
-function toHeaderRecord(
-  headers: UpstreamRequestInit["headers"],
-): Record<string, string> {
-  if (headers === undefined) return {};
-  if (headers instanceof Headers) {
-    const out: Record<string, string> = {};
-    headers.forEach((value: string, key: string) => {
-      out[key] = value;
-    });
-    return out;
-  }
-  if (Array.isArray(headers)) return Object.fromEntries(headers);
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    out[key] = typeof value === "string" ? value : value.join(", ");
-  }
-  return out;
-}
-
 function defaultFetchImpl(): FetchImpl {
-  return (url: string, init: UpstreamRequestInit): Promise<Response> =>
-    undiciFetch(url, {
-      method: init.method,
-      headers: toHeaderRecord(init.headers),
-      body: typeof init.body === "string" ? init.body : undefined,
-      signal: init.signal,
-      dispatcher: init.dispatcher,
-    });
+  return createNodeFetchImpl();
 }
 
 function parseModel(rawText: string): string {

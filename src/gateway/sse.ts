@@ -9,7 +9,7 @@
  * - Ok responses pipe `res.body` untouched with SSE framing headers.
  */
 
-import { bufferedPassthrough, type FetchImpl } from "./forward";
+import { bridgeToNativeBody, bufferedPassthrough, type FetchImpl } from "./forward";
 import type { EgressAgent } from "./dispatcher";
 
 /** SSE framing headers applied to every ok streaming response. */
@@ -78,5 +78,8 @@ export async function toClientSseResponse(
   const headers = new Headers(SSE_RESPONSE_HEADERS);
   const requestId: string | null = upstream.headers.get("x-request-id");
   if (requestId !== null) headers.set("x-request-id", requestId);
-  return new Response(upstream.body, { status: 200, headers });
+  return new Response(bridgeToNativeBody(upstream.body), {
+    status: 200,
+    headers,
+  });
 }

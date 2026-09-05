@@ -26,7 +26,8 @@ export type UpstreamRequestInit = Omit<RequestInit, "dispatcher"> & {
   readonly dispatcher?: EgressAgent;
 };
 
-/** Per-request undici fetch surface (supports the `dispatcher` option). */
+/** Per-request upstream fetch surface (transports adapt `dispatcher` +
+ * `signal`; see `transport.ts` for the node-fetch implementation). */
 export type FetchImpl = (
   url: string,
   init: UpstreamRequestInit,
@@ -139,6 +140,40 @@ export function pickForwardHeaders(upstream: Headers): Headers {
     if (!HOP_BY_HOP.has(key.toLowerCase())) out.set(key, value);
   });
   return out;
+}
+
+/**
+ * Bridge a foreign (non-runtime) body stream into a native one.
+ *
+ * Bun cannot pump an npm-undici `Response.body` when it serves the outer
+ * `Response` (headers flush, zero body bytes ever flow). Explicit `read()` +
+ * `enqueue()` at the JS level crosses implementations safely because chunks
+ * are plain `Uint8Array`. `null` bodies pass through as `null`.
+ */
+export function bridgeToNativeBody(
+  foreign: ReadableStream<Uint8Array> | null,
+): ReadableStream<Uint8Array> | null {
+  if (foreign === null) return null;
+  const reader = foreign.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller): Promise<void> {
+      let next;
+      try {
+        next = await reader.read();
+      } catch (err) {
+        controller.error(err);
+        return;
+      }
+      if (next.done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(next.value);
+    },
+    cancel(reason): void {
+      void reader.cancel(reason).catch(() => undefined);
+    },
+  });
 }
 
 /** Buffered 1:1 passthrough: upstream status + body + safe headers. */

@@ -12,7 +12,7 @@ const MODELS: readonly RegistryModel[] = [
   },
 ];
 
-const EGRESSES = ["http://127.0.0.1:18081", "http://127.0.0.1:18082"];
+const EGRESSES = ["socks5h://127.0.0.1:18081", "socks5h://127.0.0.1:18082"];
 
 function postResponses(
   app: ReturnType<typeof createApp>,
