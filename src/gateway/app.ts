@@ -16,7 +16,11 @@
  */
 
 import { Hono, type Context } from "hono";
-import { createNodeFetchImpl, resolveStallTimeoutMs } from "./transport";
+import {
+  createNodeFetchImpl,
+  resolveHeadersTimeoutMs,
+  resolveStallTimeoutMs,
+} from "./transport";
 import {
   OC_BASE_URL,
   OC_REGISTRY_ENTRY,
@@ -65,6 +69,7 @@ const MAX_LOG_ENTRIES = 500;
 function defaultFetchImpl(): FetchImpl {
   return createNodeFetchImpl({
     stallTimeoutMs: resolveStallTimeoutMs(),
+    headersTimeoutMs: resolveHeadersTimeoutMs(),
   });
 }
 

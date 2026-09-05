@@ -3,6 +3,8 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
   createNodeFetchImpl,
+  HEADERS_TIMEOUT_MS,
+  resolveHeadersTimeoutMs,
   resolveStallTimeoutMs,
   STALL_TIMEOUT_MS,
   type NodeFetchImplOptions,
@@ -48,6 +50,36 @@ const fastOptions: NodeFetchImplOptions = { stallTimeoutMs: 10_000 };
 
 afterEach(() => {
   expect(STALL_TIMEOUT_MS).toBeGreaterThanOrEqual(10_000);
+});
+
+describe("headers budget", () => {
+  test("default leaves room for failover under the client 30s cap", () => {
+    expect(HEADERS_TIMEOUT_MS).toBe(15_000);
+  });
+
+  test("silent upstream rejects within the headers budget", async () => {
+    const { server, url } = await startChunkedServer((_res) => {
+      // Accept the connection, never write head: headers watchdog fires.
+    });
+    try {
+      const fetchImpl: FetchImpl = createNodeFetchImpl({
+        headersTimeoutMs: 300,
+      });
+      await expect(fetchImpl(url, baseInit)).rejects.toThrow(/headers/i);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  test("headers env override parses like the stall one", () => {
+    expect(resolveHeadersTimeoutMs({})).toBe(HEADERS_TIMEOUT_MS);
+    expect(resolveHeadersTimeoutMs({ HEADERS_TIMEOUT_MS: "8000" })).toBe(
+      8_000,
+    );
+    expect(resolveHeadersTimeoutMs({ HEADERS_TIMEOUT_MS: "nope" })).toBe(
+      HEADERS_TIMEOUT_MS,
+    );
+  });
 });
 
 describe("stall budget", () => {
