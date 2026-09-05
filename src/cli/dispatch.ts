@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { runAddSub } from "./commands/add-sub.ts";
+import { runAddProxy } from "./commands/add-proxy.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runSetup } from "./commands/setup.ts";
 import { runLogs } from "./commands/logs.ts";
@@ -25,6 +26,10 @@ export const DISPATCH: Record<Subcommand, CliHandler> = {
   "add-sub": (rest) =>
     runAddSub(rest, {
       configPath: join(process.cwd(), "sing-box", "config.json"),
+      envPath: join(process.cwd(), ".env"),
+    }),
+  "add-proxy": (rest) =>
+    runAddProxy(rest, {
       envPath: join(process.cwd(), ".env"),
     }),
   logs: (rest) => runLogs(rest),

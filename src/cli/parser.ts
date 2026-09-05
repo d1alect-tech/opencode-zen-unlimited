@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 
-export const SUBCOMMANDS = ["doctor", "status", "setup", "add-sub", "logs", "serve"] as const;
+export const SUBCOMMANDS = ["doctor", "status", "setup", "add-sub", "add-proxy", "logs", "serve"] as const;
 
 export type Subcommand = (typeof SUBCOMMANDS)[number];
 
@@ -28,6 +28,7 @@ export const USAGE: string = [
   "  status    Show pinned egress and pool status",
   "  setup     Interactive first-run setup",
   "  add-sub   Add a subscription link",
+  "  add-proxy Add purchased proxy URL(s) to EGRESS_UPSTREAMS",
   "  logs      Tail gateway and relay logs",
   "  serve     Start the gateway (refuses with zero egress nodes)",
   "",
@@ -60,6 +61,16 @@ export const COMMAND_HELP: Record<Subcommand, string> = {
     "Options:",
     "  --dry-run  Print the plan, change nothing (exit 0).",
     "  --yes      Proceed without prompts; overwrite existing files.",
+    "  -h, --help  Show this help.",
+  ].join("\n"),
+  "add-proxy": [
+    "Usage: zen add-proxy <url>... [-h]",
+    "",
+    "Append proxy URL(s) to .env EGRESS_UPSTREAMS (dedup, .bak backup).",
+    "",
+    "Arguments:",
+    "  url  Proxy URL (socks5/socks/socks4/socks4a/http/https, auth optional).",
+    "",
     "  -h, --help  Show this help.",
   ].join("\n"),
   "add-sub": [
@@ -215,6 +226,19 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli {
       rest = pass2.positionals.slice(1);
       const name = pass2.values["name"];
       if (typeof name === "string") rest.push("--name", name);
+    } else if (subcommand === "add-proxy") {
+      // Add-proxy takes bare URL positionals only: accept them here so
+      // per-command strict parsing still rejects unknown flags.
+      const pass2 = parseArgs({
+        args,
+        strict: true,
+        allowPositionals: true,
+        options: {
+          help: { type: "boolean", short: "h", default: false },
+        },
+      });
+      help = pass2.values["help"] === true;
+      rest = pass2.positionals.slice(1);
     } else if (subcommand === "serve") {
       // Serve owns --no-egress-direct: accept it here, re-encode into rest
       // so the boot choke point sees the explicit direct escape hatch.

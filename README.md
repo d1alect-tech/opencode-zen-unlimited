@@ -115,11 +115,29 @@ CLI flow (`bun run src/index.ts <cmd>`): `zen setup --dry-run` previews
 the plan without changing anything, `zen setup` writes `.env` +
 `sing-box/config.json` and points at `scripts/install-scheduler.ps1`,
 `zen add-sub <url>` merges a subscription link into the sing-box config,
+`zen add-proxy <url>...` appends proxy URLs to `.env EGRESS_UPSTREAMS`,
 `zen doctor [--json]` reports health (secrets redacted, exit 1 on any
 fail), `zen status` shows pidfile liveness (`--self-heal` restarts dead
 procs with a crash toast), `zen logs <singbox|relay|gateway>` tails logs.
 `zen serve` refuses with zero egress nodes unless `--no-egress-direct`
 (local dev only). Full exit-code matrix: `docs/e2e-verify-v0.2.0.md`.
+
+## add-proxy (purchased HTTP(S) egress)
+
+The gateway egresses through SOCKS pool URLs and purchased HTTP(S)
+proxies alike (`EGRESS_UPSTREAMS`, see `.env.example`). `http://` targets
+forward with an absolute URI, `https://` targets tunnel via `CONNECT`
+plus SNI, proxy auth rides `Proxy-Authorization` (placeholders only):
+
+```powershell
+bun run src/index.ts add-proxy http://user:pass@proxy.example.com:8080 https://user:pass@proxy.example.com:8443
+# -> added 2 proxy URLs to EGRESS_UPSTREAMS (3 total).
+# -> next: run `zen doctor` to verify gateway, relay and egress health.
+```
+
+Append-only with dedup (reruns add 0, existing entries never rewritten),
+`.env.bak` backup before mutation, exit 0 ok / 2 usage-or-bad-url /
+1 write failure. Node links (`vless:` etc.) stay with `zen add-sub`.
 
 ## Verify
 

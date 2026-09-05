@@ -76,14 +76,18 @@ function outboundKey(ob: SingboxOutbound): string {
   return `tag:${ob.tag}`;
 }
 
-function backup(path: string): void {
+/** Copy `path` to `path.bak` when it exists (shared with `add-proxy`). */
+export function backup(path: string): void {
   if (existsSync(path)) {
     copyFileSync(path, `${path}.bak`);
   }
 }
 
-/** Replace or append a KEY=value line, preserving every other line. */
-function upsertEnvKey(envText: string, key: string, value: string): string {
+/**
+ * Replace or append a KEY=value line, preserving every other line.
+ * Shared with `add-proxy` (same `.env` mutation contract).
+ */
+export function upsertEnvKey(envText: string, key: string, value: string): string {
   const lines = envText.split(/\r?\n/);
   let found = false;
   const out = lines.map((line) => {
