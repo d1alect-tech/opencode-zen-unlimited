@@ -78,16 +78,19 @@ Troubleshooting:
 | Symptom | Cause / fix |
 |---|---|
 | `connection refused` on :20128 | Stack down — `zen status --self-heal`, then `zen doctor` |
-| Upstream `Model "" is not supported` | Empty body arrived — on Windows PowerShell, `-d '{...}'` quoting gets mangled; send JSON via `-d @body.json` file instead |
+| Upstream `Model "" is not supported` | Empty body arrived — on Windows PowerShell, `-d '{...}'` quoting gets mangled; always `curl.exe` (not the `curl` alias) and send JSON via `-d @body.json` file instead |
+| `bun`/`node` not found in an elevated shell or scheduled task | PS 5.1 vs pwsh 7 / SYSTEM PATH quirk — user-level tools are not on that PATH; use full tool paths (the scheduler wrappers embed them) |
 | HTTP 429 + `zen add-sub` hint | Per-IP free quota exhausted — wait out cooldown, pool rotates on fresh 429s |
 | `sing-box check` fails after `add-sub` | Never hand-edit generated outbounds; rerun `zen add-sub <url>` (idempotent, rewires pool) |
 
 ## Autostart (Windows)
 
-One-click, no manual `schtasks`: right-click
-`scripts/install-zen-autostart.cmd` → **Run as administrator** → approve
-the UAC prompt. It registers `oc-singbox`, `oc-relay`, `oc-gateway`
-(staggered boot delays) plus the `oc-watchdog` 5-min self-heal, pointing
-at `./bin/sing-box.exe` and `sing-box/config.json`. Verify with
-`zen doctor` (scheduler check flips to pass). Full matrix:
+One file, no manual `schtasks`, no right-click admin dance: run
+`scripts/install-zen-stack.ps1` from any PowerShell — it self-elevates
+via UAC, imports `oc-singbox` / `oc-relay` / `oc-gateway` (staggered
+boot delays PT1M/PT2M/PT3M) plus the `oc-watchdog` PT5M self-heal in a
+single XML shot as SYSTEM, resolves bun/node by full path (user PATH is
+invisible to SYSTEM), and transcripts to `scripts/install-zen-stack.log`
+(instant-close safe). Preview with `-WhatIf`, remove with `-Unregister`.
+Verify with `zen doctor` (scheduler check flips to pass). Full matrix:
 `docs/e2e-verify-v0.2.0.md`.

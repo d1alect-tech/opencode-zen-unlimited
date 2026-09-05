@@ -214,13 +214,13 @@ export function createChecksB(deps: ChecksBDeps = {}): Check[] {
           : {
               result: "warn",
               detail: `missing scheduler tasks: ${missing.join(", ")}`,
-              fixHint: "register tasks: run scripts/install-scheduler.ps1 from elevated PowerShell",
-            };
-      } catch (err) {
-        return {
-          result: "warn",
-          detail: `scheduler query failed: ${err instanceof Error ? err.message : String(err)}`,
-          fixHint: "register tasks: run scripts/install-scheduler.ps1 from elevated PowerShell",
+               fixHint: "register tasks: run scripts/install-zen-stack.ps1 (self-elevates via UAC; log: scripts/install-zen-stack.log)",
+             };
+       } catch (err) {
+         return {
+           result: "warn",
+           detail: `scheduler query failed: ${err instanceof Error ? err.message : String(err)}`,
+           fixHint: "register tasks: run scripts/install-zen-stack.ps1 (self-elevates via UAC; log: scripts/install-zen-stack.log)",
         };
       }
     },

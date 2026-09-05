@@ -10,8 +10,10 @@
  *    overwritten without --yes),
  * 4. emit sing-box/config.json from sing-box/config.example.json
  *    when missing (never overwritten without --yes),
- * 5. register scheduler tasks via scripts/install-scheduler.ps1
- *    (oc-singbox, oc-relay, oc-gateway),
+ * 5. register scheduler tasks via scripts/install-zen-stack.ps1
+ *    (oc-singbox, oc-relay, oc-gateway, oc-watchdog; self-elevates
+ *    via UAC, single-shot XML import as SYSTEM, transcript to
+ *    scripts/install-zen-stack.log),
  * 6. print next steps (`zen add-sub <url>`, `zen doctor`).
  *
  * `--dry-run` prints the full plan, changes nothing, exits 0.
@@ -217,7 +219,7 @@ export async function runSetup(rest: readonly string[], deps?: SetupDeps): Promi
   const examplePath = join(resolved.projectRoot, ".env.example");
   const singboxExample = join(resolved.projectRoot, "sing-box", "config.example.json");
   const singboxConfig = join(resolved.projectRoot, "sing-box", "config.json");
-  const scriptPath = join(resolved.projectRoot, "scripts", "install-scheduler.ps1");
+  const scriptPath = join(resolved.projectRoot, "scripts", "install-zen-stack.ps1");
 
   if (dryRun) {
     emitPlan(resolved, envPath, singboxConfig, singboxExample, scriptPath);
@@ -280,7 +282,7 @@ export async function runSetup(rest: readonly string[], deps?: SetupDeps): Promi
 
     // (5) scheduler tasks (Windows-only; the ps1 is owned by T13).
     if (resolved.platform !== "win32") {
-      console.log("skip: scheduler registration (Windows-only, run scripts/install-scheduler.ps1 on Windows)");
+      console.log("skip: scheduler registration (Windows-only, run scripts/install-zen-stack.ps1 on Windows)");
     } else {
       const result = resolved.execScheduler(scriptPath, []);
       if (!result.ok) {

@@ -182,7 +182,7 @@ function gatewayExhaustedResponse(retryAfterSec: number): Response {
   return new Response(
     JSON.stringify({
       error: {
-        message: `All egresses are rate-limited. Add more VPN subscriptions with 'zen add-sub <url>' or wait for reset (retry after ${retryAfterSec} s). See docs/setup-with-ai.md.`,
+        message: `All egresses are rate-limited. Add more VPN subscriptions with 'zen add-sub <url>' or wait for reset (retry after ${retryAfterSec} s). See docs/archive/setup-with-ai.md.`,
         type: "gateway_rate_limited",
       },
     }),

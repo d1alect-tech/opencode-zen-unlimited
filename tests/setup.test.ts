@@ -79,7 +79,7 @@ describe("zen setup command", () => {
     expect(existsSync(join(root, "sing-box", "config.json"))).toBe(false);
     expect(existsSync(join(root, "pids"))).toBe(false);
     expect(existsSync(join(root, "logs"))).toBe(false);
-    for (const line of ["pids", "logs", "sing-box", ".env", "config.json", "install-scheduler", "add-sub", "doctor"]) {
+    for (const line of ["pids", "logs", "sing-box", ".env", "config.json", "install-zen-stack", "add-sub", "doctor"]) {
       expect(r.out).toContain(line);
     }
   });
