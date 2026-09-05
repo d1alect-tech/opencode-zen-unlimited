@@ -9,24 +9,24 @@ Unlimited free `muse-spark` access for OpenCode through a local gateway, a stick
 Fastest path: copy the whole block below, paste your subscription link (or proxy list) into the placeholders, and send it to any agent with access to your machine (OpenCode, Claude Code, Cursor). The agent installs and verifies everything; it will ask you for anything missing (link, proxies, UAC approval, OpenCode restart).
 
 ```text
-Ты разворачиваешь opencode-zen-unlimited — локальный egress-proxy для безлимитных бесплатных моделей OpenCode Zen. Репозиторий: <ПУТЬ_К_РЕПО> (не склонирован — склонируй https://github.com/d1alect-tech/opencode-zen-unlimited и работай в нём).
+You are setting up opencode-zen-unlimited — a local egress proxy for unlimited free OpenCode Zen models. Repo: <REPO_PATH> (not cloned — clone https://github.com/d1alect-tech/opencode-zen-unlimited and work in it).
 
-Мои секреты (считай секретами сессии: держи в env, не пиши в файлы репозитория, не логируй целиком, не показывай в выводе):
-- VPN-подписка: <ВСТАВЬ_ССЫЛКУ_ИЛИ_ПУСТО> (пусто — спроси, есть ли купленные прокси, и попроси их списком).
-- Купленные прокси: <СПИСОК_ИЛИ_ПУСТО>.
+My secrets (treat as session secrets: keep in env, never write into repo files, never log in full, never echo back):
+- VPN subscription: <PASTE_LINK_OR_EMPTY> (empty — ask whether I have purchased proxies and request them as a list).
+- Purchased proxies: <LIST_OR_EMPTY>.
 
-Целевая архитектура: OpenCode → gateway 127.0.0.1:20128 → relay 127.0.0.1:1090 → sing-box egress → https://opencode.ai/zen. Провайдер "oc" (keyless), модель "oc/muse-spark-1.3-contributor-free". Без egress безлимита нет — egress обязателен.
+Target architecture: OpenCode → gateway 127.0.0.1:20128 → relay 127.0.0.1:1090 → sing-box egress → https://opencode.ai/zen. Provider "oc" (keyless), model "oc/muse-spark-1.3-contributor-free". No egress = no unlimited — egress is mandatory.
 
-Порядок действий (Windows, PowerShell):
-0. Окружение: bun >= 1.3.14 (нет — поставь с bun.sh, переоткрой терминал), node >= 22, sing-box >= 1.14.0 (нет — запусти scripts/get-singbox.ps1). Порты 1081-1086/1090/20128 свободны, бинды только на loopback.
-1. В корне: `bun install`, затем `bun run src/index.ts setup --dry-run` (покажи мне план), затем `setup` (пишет .env + sing-box/config.json из примеров).
-2. Egress: подписку — через `bun run src/index.ts add-sub <ссылка>`; купленные прокси — через `bun run src/index.ts add-proxy <url>...` (можно несколько раз, с дедупом). Форматы: socks5h://user:pass@host:port или http(s)://user:pass@host:port.
-3. Старт строго по порядку: sing-box → relay (`node src/relay/rr-socks.mjs`) → gateway (`bun run src/index.ts serve`). .env читается при старте — после правок перезапускай процессы.
-4. Автозапуск: `scripts/install-zen-stack.ps1` (сам повышает права через UAC; если окно гаснет — смотри scripts/install-zen-stack.log). Сначала прогони с `-WhatIf`, покажи мне вывод.
-5. Провайдер OpenCode: влей блок `oc` по docs/agents/configure-oc-provider.md в мой opencode.json. Дальше Я САМ выйду из OpenCode, зайду заново и выберу модель — тебе туда не лезть, просто скажи когда.
-6. Проверка: `doctor` (fails разбери, варнинги покажи), `curl.exe .../api/health` → {"ok":true}, `/v1/models` → dual ids oc/<id>, POST /v1/responses (тело через файл: Set-Content body.json + curl -d @body.json, файл потом удали) → 200 с текстом модели.
+Steps (Windows, PowerShell):
+0. Environment: bun >= 1.3.14 (missing — install from bun.sh, reopen the terminal), node >= 22, sing-box >= 1.14.0 (missing — run scripts/get-singbox.ps1). Ports 1081-1086/1090/20128 free, loopback binds only.
+1. In repo root: `bun install`, then `bun run src/index.ts setup --dry-run` (show me the plan), then `setup` (writes .env + sing-box/config.json from the examples).
+2. Egress: subscription via `bun run src/index.ts add-sub <link>`; purchased proxies via `bun run src/index.ts add-proxy <url>...` (repeatable, deduped). Formats: socks5h://user:pass@host:port or http(s)://user:pass@host:port.
+3. Start strictly in order: sing-box → relay (`node src/relay/rr-socks.mjs`) → gateway (`bun run src/index.ts serve`). .env is read at startup — restart processes after edits.
+4. Autostart: `scripts/install-zen-stack.ps1` (self-elevates via UAC; if the window dies — check scripts/install-zen-stack.log). Dry-run with `-WhatIf` first, show me the output.
+5. OpenCode provider: merge the `oc` block per docs/agents/configure-oc-provider.md into my opencode.json. Then *I* will quit OpenCode, reopen it, and pick the model myself — don't touch it, just tell me when.
+6. Verify: `doctor` (explain failures, show warnings), `curl.exe .../api/health` → {"ok":true}, `/v1/models` → dual ids oc/<id>, POST /v1/responses (body via file: Set-Content body.json + curl -d @body.json, delete the file after) → 200 with model text.
 
-Правила: секреты — только env, никогда в коммит; показывай мне команду и вывод каждого шага; если чего-то не хватает (ссылка, прокси, подтверждение UAC) — спроси меня и жди, не выдумывай. Грабли: bare model id без oc/ → 401; spark только через /responses (шлюз уже учитывает); xhttp-ноды add-sub дропает молча (sing-box 1.14); свежий 429 → авторотация egress.
+Rules: secrets in env only, never commit; show me each command and its output; if anything is missing (link, proxies, UAC approval) — ask me and wait, never invent. Gotchas: bare model id without oc/ → 401; spark only via /responses (the gateway handles it); add-sub silently drops xhttp nodes (sing-box 1.14); fresh 429 → automatic egress rotation.
 ```
 
 ## What, who, and non-goals
