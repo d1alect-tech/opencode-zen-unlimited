@@ -16,3 +16,5 @@ Thumbs.db
 bin/
 # generated scheduler wrappers (written by install-zen-stack.ps1, hands off)
 scripts/oc-*-run.ps1
+# local agent scratch (session notes, never project content)
+.scratch/
