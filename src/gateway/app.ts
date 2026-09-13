@@ -38,6 +38,7 @@ import {
   bufferedPassthrough,
   resolveRoute,
   rewriteModelBody,
+  sanitizeResponsesBody,
   stripOcPrefix,
   wantsStreaming,
   type FetchImpl,
@@ -180,7 +181,9 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     const outgoing: string =
       route === "/responses" && inboundShape === "chat"
         ? translateChatToResponses(rawText)
-        : rewriteModelBody(rawText);
+        : route === "/responses"
+          ? sanitizeResponsesBody(rawText)
+          : rewriteModelBody(rawText);
     const {
       res: upstream,
       attempts,

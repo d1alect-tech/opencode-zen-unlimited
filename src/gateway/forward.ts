@@ -121,6 +121,41 @@ export function rewriteModelBody(rawText: string): string {
 }
 
 /**
+ * Sanitize a Responses request body for upstream forward.
+ *
+ * Root cause for `reasoning encrypted_content was not issued to this caller`:
+ * reasoning items (id + encrypted_content) are bound to the egress IP/key
+ * that issued them. The pool rotates egresses, so replaying a previous
+ * turn's reasoning block through a new egress is rejected. Omitting them
+ * is always legal — upstream just re-reasons (extra tokens, never an error).
+ * Same for `previous_response_id` (server-side state of another egress).
+ * Everything else passes through; only the `oc/` model prefix is stripped.
+ * Non-JSON bodies pass through untouched.
+ */
+export function sanitizeResponsesBody(rawText: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawText) as unknown;
+  } catch {
+    return rawText;
+  }
+  if (typeof parsed !== "object" || parsed === null) return rawText;
+  const record = parsed as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...record };
+  if (typeof record["model"] === "string") {
+    out["model"] = stripOcPrefix(record["model"] as string);
+  }
+  if (Array.isArray(record["input"])) {
+    out["input"] = (record["input"] as unknown[]).filter((item) => {
+      if (typeof item !== "object" || item === null) return true;
+      return (item as Record<string, unknown>)["type"] !== "reasoning";
+    });
+  }
+  delete out["previous_response_id"];
+  return JSON.stringify(out);
+}
+
+/**
  * Upstream Responses API rejects the vendor `max` effort (verified 400;
  * `minimal`..`xhigh` pass). Map `max` down to `xhigh` and say so.
  */
