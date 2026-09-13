@@ -53,10 +53,16 @@ Notes:
   strips the prefix. Full live list (the autoparser refreshes it; never
   hard-code elsewhere):
   `http://localhost:20128/dashboard/providers/opencode`.
-- spark 1.3 speaks ONLY `/responses`. OpenCode may send it via
-  `/v1/chat/completions` — the gateway re-routes by `targetFormat`, so
-  both surfaces work. A direct `500 "format must match request format"`
-  means the request bypassed the gateway.
+- spark 1.3 speaks ONLY `/responses`. OpenCode (openai-compatible
+  provider) always sends chat-shaped bodies — the gateway translates
+  them (`translateChatToResponses`: messages to input, function tools,
+  `reasoning_effort` to `reasoning.effort`, `max_tokens` to
+  `max_output_tokens`) and routes by `targetFormat`, so both surfaces
+  work. A direct `500 "format must match request format"` means the
+  request bypassed the gateway.
+- Upstream rejects vendor effort `max` (measured 400); the translator
+  maps it to `xhigh` (measured 200 with reasoning). The `max` variant
+  in the provider block therefore behaves as `xhigh` on this path.
 - `disabled_providers` must NOT contain `oc`. Leave the user's default
   `model`/`small_model` alone unless asked to switch.
 - Secrets rule: no tokens, passwords, or subscription URLs in code, docs,

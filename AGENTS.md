@@ -71,3 +71,13 @@ Specs live in `docs/`. Agent guides live in `docs/agents/`. The
 Goal-1 instruction stub is `docs/sub-link-to-egress.md`. Keep docs
 short, concrete, and tied to real paths. Update docs in the same commit
 as the code they describe.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (via `gh`). See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context layout. See `docs/agents/domain.md`.

@@ -160,10 +160,12 @@ function New-WrapperBody {
 }
 
 function Test-Port {
-  param([string]$Host, [int]$Port, [int]$TimeoutMs = 3000)
+  # NOTE: the first param must NOT be named $Host (read-only automatic
+  # variable - binding it aborts the verify stage after tasks are started).
+  param([string]$TargetHost, [int]$Port, [int]$TimeoutMs = 3000)
   try {
     $client = New-Object Net.Sockets.TcpClient
-    $iar = $client.BeginConnect($Host, $Port, $null, $null)
+    $iar = $client.BeginConnect($TargetHost, $Port, $null, $null)
     if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutMs)) { return $false }
     $client.EndConnect($iar)
     $client.Close()

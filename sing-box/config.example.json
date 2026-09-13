@@ -51,16 +51,51 @@
     },
     {
       "type": "socks",
-      "tag": "socks-1085",
+      "tag": "socks-1087",
       "listen": "127.0.0.1",
-      "listen_port": 1085,
+      "listen_port": 1087,
       "domain_resolver": "doh-11"
     },
     {
       "type": "socks",
-      "tag": "socks-1086",
+      "tag": "socks-1088",
       "listen": "127.0.0.1",
-      "listen_port": 1086,
+      "listen_port": 1088,
+      "domain_resolver": "doh-11"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-1091",
+      "listen": "127.0.0.1",
+      "listen_port": 1091,
+      "domain_resolver": "doh-11"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-1093",
+      "listen": "127.0.0.1",
+      "listen_port": 1093,
+      "domain_resolver": "doh-11"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-1097",
+      "listen": "127.0.0.1",
+      "listen_port": 1097,
+      "domain_resolver": "doh-11"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-1099",
+      "listen": "127.0.0.1",
+      "listen_port": 1099,
+      "domain_resolver": "doh-11"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-1100",
+      "listen": "127.0.0.1",
+      "listen_port": 1100,
       "domain_resolver": "doh-11"
     }
   ],
@@ -75,7 +110,9 @@
         "enabled": true,
         "server_name": "YOUR_HY2_SERVER_NL",
         "insecure": false,
-        "alpn": ["h3"]
+        "alpn": [
+          "h3"
+        ]
       },
       "brutal_debug": false,
       "bbr_profile": "standard"
@@ -90,7 +127,9 @@
         "enabled": true,
         "server_name": "YOUR_HY2_SERVER_DE",
         "insecure": false,
-        "alpn": ["h3"]
+        "alpn": [
+          "h3"
+        ]
       },
       "brutal_debug": false,
       "bbr_profile": "standard"
@@ -105,7 +144,9 @@
         "enabled": true,
         "server_name": "YOUR_HY2_SERVER_FI",
         "insecure": false,
-        "alpn": ["h3"]
+        "alpn": [
+          "h3"
+        ]
       },
       "brutal_debug": false,
       "bbr_profile": "standard"
@@ -120,7 +161,9 @@
         "enabled": true,
         "server_name": "YOUR_HY2_SERVER_PL",
         "insecure": false,
-        "alpn": ["h3"]
+        "alpn": [
+          "h3"
+        ]
       },
       "brutal_debug": false,
       "bbr_profile": "standard"
@@ -135,7 +178,9 @@
         "enabled": true,
         "server_name": "YOUR_HY2_SERVER_SE",
         "insecure": false,
-        "alpn": ["h3"]
+        "alpn": [
+          "h3"
+        ]
       },
       "brutal_debug": false,
       "bbr_profile": "standard"
@@ -150,7 +195,9 @@
         "enabled": true,
         "server_name": "YOUR_HY2_SERVER_CZ",
         "insecure": false,
-        "alpn": ["h3"]
+        "alpn": [
+          "h3"
+        ]
       },
       "brutal_debug": false,
       "bbr_profile": "standard"
@@ -166,7 +213,14 @@
     {
       "type": "urltest",
       "tag": "auto",
-      "outbounds": ["nl-hy2", "de-hy2", "fi-hy2", "pl-hy2", "se-hy2", "cz-hy2"],
+      "outbounds": [
+        "nl-hy2",
+        "de-hy2",
+        "fi-hy2",
+        "pl-hy2",
+        "se-hy2",
+        "cz-hy2"
+      ],
       "url": "https://www.gstatic.com/generate_204",
       "interval": "1m",
       "tolerance": 50
@@ -174,41 +228,97 @@
     {
       "type": "selector",
       "tag": "select",
-      "outbounds": ["nl-hy2", "de-hy2", "fi-hy2", "pl-hy2", "se-hy2", "cz-hy2", "auto", "direct"],
+      "outbounds": [
+        "nl-hy2",
+        "de-hy2",
+        "fi-hy2",
+        "pl-hy2",
+        "se-hy2",
+        "cz-hy2",
+        "auto",
+        "direct"
+      ],
       "default": "auto"
     }
   ],
   "route": {
     "rules": [
       {
-        "inbound": ["socks-1081"],
+        "inbound": [
+          "socks-1081"
+        ],
         "action": "route",
         "outbound": "nl-hy2"
       },
       {
-        "inbound": ["socks-1082"],
+        "inbound": [
+          "socks-1082"
+        ],
         "action": "route",
         "outbound": "de-hy2"
       },
       {
-        "inbound": ["socks-1083"],
+        "inbound": [
+          "socks-1083"
+        ],
         "action": "route",
         "outbound": "fi-hy2"
       },
       {
-        "inbound": ["socks-1084"],
+        "inbound": [
+          "socks-1084"
+        ],
         "action": "route",
         "outbound": "pl-hy2"
       },
       {
-        "inbound": ["socks-1085"],
+        "inbound": [
+          "socks-1087"
+        ],
         "action": "route",
-        "outbound": "se-hy2"
+        "outbound": "nl-hy2"
       },
       {
-        "inbound": ["socks-1086"],
+        "inbound": [
+          "socks-1088"
+        ],
+        "action": "route",
+        "outbound": "de-hy2"
+      },
+      {
+        "inbound": [
+          "socks-1091"
+        ],
+        "action": "route",
+        "outbound": "pl-hy2"
+      },
+      {
+        "inbound": [
+          "socks-1093"
+        ],
         "action": "route",
         "outbound": "cz-hy2"
+      },
+      {
+        "inbound": [
+          "socks-1097"
+        ],
+        "action": "route",
+        "outbound": "nl-hy2"
+      },
+      {
+        "inbound": [
+          "socks-1099"
+        ],
+        "action": "route",
+        "outbound": "fi-hy2"
+      },
+      {
+        "inbound": [
+          "socks-1100"
+        ],
+        "action": "route",
+        "outbound": "pl-hy2"
       }
     ],
     "final": "direct",

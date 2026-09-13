@@ -1,52 +1,45 @@
-# Issue tracker, local markdown convention
+# Issue tracker: GitHub
 
-Decision is final: local markdown tracker only. Do not ask about it.
-Do not create GitHub issues for this project.
+Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
-## Layout
+## Conventions
 
-One directory per feature or goal under `.scratch/`:
+- **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
+- **Read an issue**: `gh issue view <number> --comments`, filtering comments by `jq` and also fetching labels.
+- **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
+- **Comment on an issue**: `gh issue comment <number> --body "..."`
+- **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
+- **Close**: `gh issue close <number> --comment "..."`
 
-```text
-.scratch/<feature>/ISSUE.md    # task list, checkboxes, owners
-.scratch/<feature>/NOTES.md    # findings, proofs, curl outputs (optional)
-.scratch/<feature>/LOGS/       # pasted log excerpts (optional)
-```
+Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
-`<feature>` is lowercase with dashes, for example
-`.scratch/sub-link-to-egress/`, `.scratch/gateway/`,
-`.scratch/relay-pool/`.
+## Pull requests as a triage surface
 
-## ISSUE.md workflow
+**PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
 
-1. Create `.scratch/<feature>/ISSUE.md` with a short goal line, a
-   checkbox task list, and a facts section (ports, model ids, file
-   paths touched).
-2. Work the list top to bottom. Check boxes as each lands with a test.
-3. Record verify output (curl status lines, `bun test` tail) in the
-   file or in `NOTES.md`. No secrets, placeholders only.
-4. Close by noting the commit hash at the top of `ISSUE.md`.
+When set to `yes`, PRs run through the same labels and states as issues, using the `gh pr` equivalents:
 
-Template:
+- **Read a PR**: `gh pr view <number> --comments` and `gh pr diff <number>` for the diff.
+- **List external PRs for triage**: `gh pr list --state open --json number,title,body,labels,author,authorAssociation,comments` then keep only `authorAssociation` of `CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`, or `NONE` (drop `OWNER`/`MEMBER`/`COLLABORATOR`).
+- **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
 
-```markdown
-# <feature> (status: open|done, commit: <hash when done>)
+GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with `gh pr view 42` and fall back to `gh issue view 42`.
 
-Goal: one line.
+## When a skill says "publish to the issue tracker"
 
-- [ ] failing test in tests/<module>.test.ts
-- [ ] src change in src/<module>/
-- [ ] bunx tsc --noEmit clean, bun test green
-- [ ] docs updated in same commit
+Create a GitHub issue.
 
-Facts: ports, model ids, paths.
-```
+## When a skill says "fetch the relevant ticket"
 
-## Rules
+Run `gh issue view <number> --comments`.
 
-- `.scratch/` is local working state. It may stay uncommitted.
-- Never paste tokens, passwords, API keys, or subscription URLs into
-  `.scratch/` files that get committed. Use `YOUR_*` placeholders.
-- One feature per directory. If scope grows, split the directory.
-- No GitHub issues, no remote boards, no questions about where to
-  track. This file is the answer.
+## Wayfinding operations
+
+Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
+
+- **Map**: a single issue labelled `wayfinder:map`, holding the Notes / Decisions-so-far / Fog body. `gh issue create --label wayfinder:map`.
+- **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Labels: `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Once claimed, the ticket is assigned to the driving dev.
+- **Blocking**: GitHub's **native issue dependencies**, the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric **database id** (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, _not_ the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only, the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed.
+- **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (`issue_dependencies_summary.blocked_by > 0`, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
+- **Claim**: `gh issue edit <n> --add-assignee @me`, the session's first write.
+- **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.
