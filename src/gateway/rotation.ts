@@ -337,17 +337,31 @@ export async function fetchWithRotation(
   let attempts = 0;
   let stalls = 0;
   let authFails = 0;
+  let optimisticProbes = 0;
   let lastEgress: string | undefined;
   let lastRes: Response | undefined;
 
   while (attempts < maxAttempts && now() - startMs <= REQUEST_DEADLINE_MS) {
     let egress: string | undefined = pool.pick();
-    // When all egresses are benched, optimistically retry the least-benched
-    // one instead of failing instantly with a synthetic 429. Direct probes
-    // showed benched egresses often recover well before the 1h quarantine
-    // expires (most returned 200 while still benched), and a synthetic
-    // 429 makes headroom hang 35s with 0 bytes instead of forwarding.
+    // When all egresses are benched, allow exactly one optimistic probe
+    // of the least-benched one instead of failing instantly with a
+    // synthetic 429. Direct probes showed benched egresses often recover
+    // well before the 15m quarantine expires (most returned 200 while
+    // still benched), and a synthetic 429 makes headroom hang 35s with
+    // 0 bytes instead of forwarding. Uncapped probing turns a full-pool
+    // 429 into N upstream hits per client request and every re-429
+    // re-benches now+15m, so the quarantine self-extends under traffic.
     if (egress === undefined) {
+      if (optimisticProbes >= 1) {
+        return {
+          res: gatewayExhaustedResponse(
+            gatewayRetryAfterSec(pool, options.egresses, now()),
+          ),
+          attempts,
+          egressUrl: lastEgress,
+          provenance: "gateway",
+        };
+      }
       let best: string | undefined;
       let bestUntil = Number.POSITIVE_INFINITY;
       for (const cand of options.egresses) {
@@ -358,6 +372,7 @@ export async function fetchWithRotation(
         }
       }
       egress = best;
+      optimisticProbes += 1;
       if (egress === undefined) {
         return {
           res: gatewayExhaustedResponse(
@@ -455,6 +470,16 @@ export async function fetchWithRotation(
     };
   }
   if (finalRes.status === 429) {
+    if (optimisticProbes >= 1) {
+      return {
+        res: gatewayExhaustedResponse(
+          gatewayRetryAfterSec(pool, options.egresses, now()),
+        ),
+        attempts,
+        egressUrl: lastEgress,
+        provenance: "gateway",
+      };
+    }
     return {
       res: withRetryAfterFallback(
         finalRes,
