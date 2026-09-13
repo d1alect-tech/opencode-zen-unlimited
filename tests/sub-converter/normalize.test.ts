@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { NormalizedNode } from "../../src/sub-converter/types.ts";
-import { assignTags, dedupNodes, filterNodes, normalizeNode } from "../../src/sub-converter/normalize.ts";
+import { assignTags, dedupNodes, filterNodes, normalizeNode, transportFrom } from "../../src/sub-converter/normalize.ts";
 
 const mk = (over: Partial<NormalizedNode>): NormalizedNode => ({
   proto: "vless",
@@ -38,6 +38,10 @@ describe("normalize", () => {
     const a = mk({ proto: "vless", server: "example.com", server_port: 443 });
     const b = mk({ proto: "hysteria2", server: "EXAMPLE.com", server_port: 443 });
     expect(dedupNodes([a, b])).toHaveLength(2);
+  });
+
+  test("grpc drops mode=gun for sing-box 1.14 compat", () => {
+    expect(transportFrom("grpc", undefined, "gun")).toEqual({ type: "grpc" });
   });
 
   test("stable tags proto-host-port with collision suffix", () => {

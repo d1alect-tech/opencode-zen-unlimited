@@ -6,7 +6,9 @@ export function realityFrom(publicKey?: string, shortId?: string): RealityConfig
   return { public_key: publicKey, short_id: shortId };
 }
 
-/** Build a transport config; undefined for tcp/none/missing networks. */
+/** Build a transport config; undefined for tcp/none/missing networks.
+ *  ponytail: drops `mode` on grpc only — sing-box 1.14 grpc has no mode
+ *  field (gun), re-add when bumping past 1.14. */
 export function transportFrom(
   network?: string | null,
   path?: string | null,
@@ -14,6 +16,7 @@ export function transportFrom(
 ): TransportConfig | undefined {
   const type = (network ?? "").trim().toLowerCase();
   if (type === "" || type === "tcp" || type === "none") return undefined;
+  if (type === "grpc") return { type, ...(path ? { path } : {}) };
   return {
     type,
     ...(path ? { path } : {}),

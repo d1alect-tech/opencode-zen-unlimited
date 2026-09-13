@@ -1,5 +1,5 @@
 // Pure helpers extracted verbatim from src/relay/rr-socks.mjs for testability.
-// No logic change: sticky pin, cooldowns, ports 1081-1086, LIMIT_RE intact.
+// No logic change: sticky pin, cooldowns, ports 1081..1096 except 1090, LIMIT_RE intact.
 // rr-socks.mjs remains the behavior-identical runtime; this module mirrors its
 // pure pieces without side effects (no net/fs/server startup on import).
 
@@ -10,7 +10,7 @@ export interface Upstream {
 
 export const PINNED_SUFFIX = "opencode.ai";
 
-export const UPSTREAMS: Upstream[] = [1081, 1082, 1083, 1084, 1085, 1086].map(
+export const UPSTREAMS: Upstream[] = [1081, 1082, 1083, 1084, 1087, 1088, 1091, 1093, 1097, 1099, 1100].map(
   (p) => ({ host: "127.0.0.1", port: p }),
 );
 
@@ -57,7 +57,7 @@ export function createPinnedPicker(
   };
 }
 
-/** Same shape as the ROTATE attr line in pollLimitsOnce(). */
+/** Legacy relay ROTATE attr line shape (no current emitter; kept for log parsing). */
 export function formatRotateLine(
   from: number,
   to: number,

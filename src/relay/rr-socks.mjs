@@ -1,14 +1,15 @@
 // Round-robin SOCKS5 relay: listens on 127.0.0.1:1090, forwards each TCP
-// connection to the next upstream in 1081..1086 (strict rotation).
+// connection to the next upstream in 1081..1096 except 1090 (strict rotation).
 // No auth on the front; upstreams are trusted localhost. TCP CONNECT only.
 import net from 'net';
 import fs from 'node:fs';
 
+// Rotation authority is the gateway inline layer (src/gateway/rotation.ts).
+// This relay is a dumb round-robin/sticky-pin diagnostic port: no watcher,
+// no second rotation opinion. A dead 429-watcher lived here until it was
+// removed (its proxy-logs contract never matched the gateway shape, so it
+// never fired once).
 const ATTR_LOG = process.env.RR_ATTR_LOG || null;
-const WATCH_TOKEN = process.env.RR_WATCH_TOKEN || null;
-const WATCH_URL = process.env.RR_WATCH_URL || 'http://localhost:20128/api/usage/proxy-logs?limit=20';
-const WATCH_INTERVAL_MS = Number(process.env.RR_WATCH_INTERVAL_MS || 15000);
-const COOLDOWN_MS = Number(process.env.RR_COOLDOWN_MS || 15 * 60 * 1000);
 const PINNED_SUFFIX = 'opencode.ai';
 
 let pinnedIdx = 1; // UPSTREAMS[1] = 1082 (DE), initial sticky egress
@@ -25,40 +26,8 @@ function pickPinned() {
   return UPSTREAMS[pinnedIdx];
 }
 function noteAttr(line) { if (ATTR_LOG) fs.appendFileSync(ATTR_LOG, line + '\n'); }
-const LIMIT_RE = /429|rate.?limited|rate.?limit|quota|freeusagelimit|usage.?limit/i;
-async function pollLimitsOnce() {
-  if (!WATCH_TOKEN) return;
-  let rows = null;
-  try {
-    const res = await fetch(WATCH_URL, { headers: { Authorization: `Bearer ${WATCH_TOKEN}` } });
-    if (!res.ok) return;
-    rows = await res.json();
-  } catch { return; }
-  if (!Array.isArray(rows)) return;
-  const fresh = Date.now() - 90000;
-  const hit = rows.find((x) => x && x.status === 'error'
-    && ((x.provider || '').includes('opencode') || String(x.targetUrl || '').includes('opencode'))
-    && LIMIT_RE.test(String(x.error || ''))
-    && new Date(x.timestamp).getTime() > fresh);
-  if (!hit) return;
-  const cur = UPSTREAMS[pinnedIdx].port;
-  cooldownUntil.set(cur, Date.now() + COOLDOWN_MS);
-  for (let k = 1; k <= UPSTREAMS.length; k++) {
-    const idx = (pinnedIdx + k) % UPSTREAMS.length;
-    if (!isCooled(UPSTREAMS[idx].port)) { pinnedIdx = idx; break; }
-  }
-  noteAttr(`${new Date().toISOString()} ROTATE from=${cur} to=${UPSTREAMS[pinnedIdx].port} reason=${String(hit.error).slice(0, 80)}`);
-  console.log(`rr-socks 429-rotate ${cur} -> ${UPSTREAMS[pinnedIdx].port}`);
-}
-function startWatcher() {
-  if (!WATCH_TOKEN) { console.log('rr-socks watcher disabled (no RR_WATCH_TOKEN)'); noteAttr(`${new Date().toISOString()} watcher=disabled`); return; }
-  console.log(`rr-socks watcher on ${WATCH_URL} every ${WATCH_INTERVAL_MS}ms`);
-  noteAttr(`${new Date().toISOString()} watcher=started interval=${WATCH_INTERVAL_MS}ms cooldown=${COOLDOWN_MS}ms`);
-  const loop = async () => { try { await pollLimitsOnce(); } finally { setTimeout(loop, WATCH_INTERVAL_MS); } };
-  setTimeout(loop, WATCH_INTERVAL_MS);
-}
 
-const UPSTREAMS = [1081, 1082, 1083, 1084, 1085, 1086].map(p => ({ host: '127.0.0.1', port: p }));
+const UPSTREAMS = [1081, 1082, 1083, 1084, 1087, 1088, 1091, 1093, 1097, 1099, 1100].map(p => ({ host: '127.0.0.1', port: p }));
 let cursor = 0;
 const next = () => UPSTREAMS[(cursor++) % UPSTREAMS.length];
 
@@ -145,5 +114,5 @@ const server = net.createServer((client) => {
     }
   });
 });
-server.listen(1090, '127.0.0.1', () => { console.log('rr-socks listening 127.0.0.1:1090'); startWatcher(); });
+server.listen(1090, '127.0.0.1', () => { console.log('rr-socks listening 127.0.0.1:1090'); });
 server.on('error', (e) => { console.error('FATAL', e.message); process.exit(1); });
