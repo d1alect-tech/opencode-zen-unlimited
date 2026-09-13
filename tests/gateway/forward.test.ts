@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { resolveRoute, stripOcPrefix, wantsStreaming } from "@/gateway/forward";
+import {
+  resolveRoute,
+  stripOcPrefix,
+  translateChatToResponses,
+  wantsStreaming,
+} from "@/gateway/forward";
 import type { RegistryModel } from "@/registry/types";
 
 const MODELS: readonly RegistryModel[] = [
@@ -73,6 +78,115 @@ describe("resolveRoute", () => {
         models: MODELS,
       }),
     ).toBe("/responses");
+  });
+});
+
+describe("translateChatToResponses", () => {
+  test("maps messages to input, strips oc/ prefix, keeps stream + sampling", () => {
+    const out = JSON.parse(
+      translateChatToResponses(
+        JSON.stringify({
+          model: "oc/muse-spark-1.3-contributor-free",
+          messages: [{ role: "user", content: "hi" }],
+          stream: true,
+          temperature: 0.5,
+          top_p: 0.9,
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(out["model"]).toBe("muse-spark-1.3-contributor-free");
+    expect(out["input"]).toEqual([{ role: "user", content: "hi" }]);
+    expect(out["stream"]).toBe(true);
+    expect(out["temperature"]).toBe(0.5);
+    expect(out["top_p"]).toBe(0.9);
+    expect("messages" in out).toBe(false);
+  });
+
+  test("maps reasoning_effort, max becomes xhigh", () => {
+    const out = JSON.parse(
+      translateChatToResponses(
+        JSON.stringify({
+          model: "muse-spark-1.3-contributor-free",
+          messages: [{ role: "user", content: "hi" }],
+          reasoning_effort: "max",
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(out["reasoning"]).toEqual({ effort: "xhigh", summary: "auto" });
+    expect("reasoning_effort" in out).toBe(false);
+  });
+
+  test("maps function tools, tool_choice and max_tokens", () => {
+    const out = JSON.parse(
+      translateChatToResponses(
+        JSON.stringify({
+          model: "muse-spark-1.3-contributor-free",
+          messages: [{ role: "user", content: "hi" }],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "get_time",
+                description: "clock",
+                parameters: { type: "object", properties: {} },
+              },
+            },
+          ],
+          tool_choice: "auto",
+          max_tokens: 512,
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(out["tools"]).toEqual([
+      {
+        type: "function",
+        name: "get_time",
+        description: "clock",
+        parameters: { type: "object", properties: {} },
+      },
+    ]);
+    expect(out["tool_choice"]).toBe("auto");
+    expect(out["max_output_tokens"]).toBe(512);
+    expect("max_tokens" in out).toBe(false);
+  });
+
+  test("maps assistant tool_calls and tool messages", () => {
+    const out = JSON.parse(
+      translateChatToResponses(
+        JSON.stringify({
+          model: "muse-spark-1.3-contributor-free",
+          messages: [
+            { role: "user", content: "time?" },
+            {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: { name: "get_time", arguments: "{}" },
+                },
+              ],
+            },
+            { role: "tool", tool_call_id: "call_1", content: "noon" },
+          ],
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(out["input"]).toEqual([
+      { role: "user", content: "time?" },
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "get_time",
+        arguments: "{}",
+      },
+      { type: "function_call_output", call_id: "call_1", output: "noon" },
+    ]);
+  });
+
+  test("non-JSON passes through untouched", () => {
+    expect(translateChatToResponses("not json")).toBe("not json");
   });
 });
 

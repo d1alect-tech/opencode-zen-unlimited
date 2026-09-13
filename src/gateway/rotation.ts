@@ -5,17 +5,28 @@
  * fallback, it is not deleted). State machine per upstream attempt:
  *
  * - 2xx -> return immediately (provider response, untouched).
- * - 429 -> bench the egress (default 60s; honors `Retry-After`
- *   delay-seconds/http-date, capped, plus jitter), rotate to the next
- *   un-benched egress, retry. At most MAX_ATTEMPTS total tries.
+ * - 429 -> two-strike quarantine: first 429 benches the egress for the
+ *   default 60s; a second 429 on the same egress within STRIKE_WINDOW_MS
+ *   quarantines it for QUOTA_BENCH_MS (provider-side per-IP cooldown is
+ *   independent per egress and does not reset at midnight). An explicit
+ *   `Retry-After` always wins over both tiers. Then rotate and retry.
  * - 401/403 -> bench the egress (default window), rotate onward. The same
- *   egress is never retried while benched.
- * - 5xx -> rotate to the next egress WITHOUT benching (transient,
- *   not quota), retry.
+ *   egress is never retried while benched. A SECOND consecutive 401/403
+ *   on another egress returns immediately WITHOUT benching: repeating
+ *   auth failures are request-shaped (bad model/format), and benching
+ *   every egress for a broken request is a self-inflicted pool outage.
+ * - 5xx -> bench 30s, but only when another egress recently succeeded
+ *   (a global outage must not drain the pool); always rotate and retry.
  * - Network timeout / stall (fetch rejects, client did not abort) -> bench
  *   the egress (default window, no Retry-After exists) and rotate onward.
- *   A body-stalled egress must not be re-pinned while it recovers.
+ *   Only SLOW rejects (at/over DIAL_FAIL_CUTOFF_MS) count toward the
+ *   two-consecutive-stall early abort: a fast dial refusal is egress-local
+ *   (dead node) and rotating past it is always safe. A body-stalled
+ *   egress must not be re-pinned while it recovers.
  * - Other 4xx -> return 1:1 immediately, no retry.
+ *
+ * Attempts default to one try per pool egress; a per-request deadline
+ * (REQUEST_DEADLINE_MS) stops slow chains before the gateway timeout.
  *
  * Error mapping is 1:1: upstream status + body pass through, `x-request-id`
  * preserved. Provenance distinguishes the two 429 sources:
@@ -38,8 +49,23 @@ import type { FetchImpl, UpstreamRequestInit } from "./forward";
 export const DEFAULT_BENCH_MS = 60_000;
 /** Cap for honored `Retry-After` values. */
 export const MAX_BENCH_MS = 300_000;
-/** Total upstream tries per client request (initial + retries). */
+/** Total upstream tries per client request (initial + retries).
+ *  Legacy fixed cap; the live default is one try per pool egress. */
 export const MAX_ATTEMPTS = 5;
+/** Second 429 on the same egress inside this window -> long quarantine. */
+export const STRIKE_WINDOW_MS = 300_000;
+/** Long quarantine for a repeatedly-429 egress (independent per-IP timer). */
+export const QUOTA_BENCH_MS = 900_000;
+/** Per-request deadline for a retry chain (under the 300s gateway timeout). */
+export const REQUEST_DEADLINE_MS = 270_000;
+/** Consecutive fetch rejects before aborting the request early. */
+export const MAX_CONSECUTIVE_TIMEOUTS = 2;
+/** Rejects faster than this are dial failures (egress-local), not stalls. */
+export const DIAL_FAIL_CUTOFF_MS = 2_000;
+/** Short bench for a 5xx egress while the pool is otherwise healthy. */
+export const FIVE_XX_BENCH_MS = 30_000;
+/** How recent a pool 2xx must be to treat a 5xx as egress-local. */
+export const HEALTHY_RECENCY_MS = 300_000;
 /** Extra random spread added to every bench window. */
 export const BENCH_JITTER_MS = 1_000;
 
@@ -92,6 +118,22 @@ export interface RotationPool {
   benchedUntil(egressUrl: string): number;
   /** Move the pin to the next egress without benching (5xx/timeout path). */
   rotate(): void;
+  /**
+   * Bench an egress for a 429: honored `Retry-After` (capped) wins;
+   * otherwise first strike benches the default window, a repeat strike
+   * inside STRIKE_WINDOW_MS quarantines for QUOTA_BENCH_MS.
+   * Returns the applied bench duration in ms.
+   */
+  note429(
+    egressUrl: string,
+    retryAfter: string | null | undefined,
+    nowMs: number,
+    random?: () => number,
+  ): number;
+  /** Record a 2xx through the pool (drives the 5xx bench gate). */
+  noteOk(nowMs: number): void;
+  /** Timestamp of the last pool 2xx (0 when none yet). */
+  lastOkAt(): number;
 }
 
 /**
@@ -106,9 +148,13 @@ export function createRotationPool(
 ): RotationPool {
   const list: string[] = [...egresses];
   const cooldownUntil = new Map<string, number>();
+  const last429At = new Map<string, number>();
+  let lastOk = 0;
   let pinnedIdx = 0;
   const isBenched = (egressUrl: string): boolean =>
     (cooldownUntil.get(egressUrl) ?? 0) > now();
+  const jitter = (random?: () => number): number =>
+    Math.floor((random ?? Math.random)() * (BENCH_JITTER_MS + 1));
   return {
     size: list.length,
     pick(): string | undefined {
@@ -130,6 +176,35 @@ export function createRotationPool(
     },
     rotate(): void {
       if (list.length > 0) pinnedIdx = (pinnedIdx + 1) % list.length;
+    },
+    note429(
+      egressUrl: string,
+      retryAfter: string | null | undefined,
+      nowMs: number,
+      random?: () => number,
+    ): number {
+      const explicit: number | undefined = parseRetryAfterMs(
+        retryAfter,
+        nowMs,
+      );
+      let windowMs: number;
+      if (explicit !== undefined) {
+        windowMs = explicit;
+      } else if (nowMs - (last429At.get(egressUrl) ?? Number.NEGATIVE_INFINITY) <= STRIKE_WINDOW_MS) {
+        windowMs = QUOTA_BENCH_MS;
+      } else {
+        windowMs = DEFAULT_BENCH_MS;
+      }
+      const applied: number = windowMs + jitter(random);
+      cooldownUntil.set(egressUrl, nowMs + applied);
+      last429At.set(egressUrl, nowMs);
+      return applied;
+    },
+    noteOk(nowMs: number): void {
+      lastOk = nowMs;
+    },
+    lastOkAt(): number {
+      return lastOk;
     },
   };
 }
@@ -217,15 +292,19 @@ function withRetryAfterFallback(
 
 /**
  * Forward with inline bench + rotate + retry. Unlimited parallel (no
- * semaphores); at most `maxAttempts` upstream tries, then the error
- * surfaces. Client aborts propagate and are never retried.
+ * semaphores); at most `maxAttempts` upstream tries (default: one per
+ * pool egress), then the error surfaces. A per-request deadline stops
+ * slow chains before the gateway timeout. Client aborts propagate and
+ * are never retried.
  */
 export async function fetchWithRotation(
   options: FetchWithRotationOptions,
 ): Promise<FetchWithRotationResult> {
   const now: () => number = options.now ?? Date.now;
   const random: () => number = options.random ?? Math.random;
-  const maxAttempts: number = options.maxAttempts ?? MAX_ATTEMPTS;
+  const maxAttempts: number =
+    options.maxAttempts ?? Math.max(options.egresses.length, 1);
+  const startMs: number = now();
   const pool: RotationPool =
     options.pool ?? createRotationPool(options.egresses, now);
 
@@ -256,26 +335,46 @@ export async function fetchWithRotation(
   }
 
   let attempts = 0;
+  let stalls = 0;
+  let authFails = 0;
   let lastEgress: string | undefined;
   let lastRes: Response | undefined;
 
-  while (attempts < maxAttempts) {
-    const egress: string | undefined = pool.pick();
+  while (attempts < maxAttempts && now() - startMs <= REQUEST_DEADLINE_MS) {
+    let egress: string | undefined = pool.pick();
+    // When all egresses are benched, optimistically retry the least-benched
+    // one instead of failing instantly with a synthetic 429. Direct probes
+    // showed benched egresses often recover well before the 1h quarantine
+    // expires (most returned 200 while still benched), and a synthetic
+    // 429 makes headroom hang 35s with 0 bytes instead of forwarding.
     if (egress === undefined) {
-      return {
-        res: gatewayExhaustedResponse(
-          gatewayRetryAfterSec(pool, options.egresses, now()),
-        ),
-        attempts,
-        egressUrl: lastEgress,
-        provenance: "gateway",
-      };
+      let best: string | undefined;
+      let bestUntil = Number.POSITIVE_INFINITY;
+      for (const cand of options.egresses) {
+        const until: number = pool.benchedUntil(cand);
+        if (until < bestUntil) {
+          bestUntil = until;
+          best = cand;
+        }
+      }
+      egress = best;
+      if (egress === undefined) {
+        return {
+          res: gatewayExhaustedResponse(
+            gatewayRetryAfterSec(pool, options.egresses, now()),
+          ),
+          attempts,
+          egressUrl: lastEgress,
+          provenance: "gateway",
+        };
+      }
     }
     lastEgress = egress;
     const dispatcher: EgressAgent | undefined =
       options.dispatcherFor?.(egress) ?? options.init.dispatcher;
 
     let res: Response;
+    const attemptStartMs: number = now();
     try {
       res = await options.fetchImpl(options.url, {
         ...options.init,
@@ -289,24 +388,31 @@ export async function fetchWithRotation(
         benchDurationMs(0, null, now(), random),
       );
       attempts += 1;
+      authFails = 0;
+      if (now() - attemptStartMs >= DIAL_FAIL_CUTOFF_MS) stalls += 1;
       pool.rotate();
+      if (stalls >= MAX_CONSECUTIVE_TIMEOUTS) throw err;
       if (attempts >= maxAttempts) throw err;
       continue;
     }
     attempts += 1;
+    stalls = 0;
     if (res.ok) {
+      pool.noteOk(now());
       return { res, attempts, egressUrl: egress, provenance: "provider" };
     }
     if (res.status === 429) {
-      pool.bench(
-        egress,
-        benchDurationMs(429, res.headers.get("retry-after"), now(), random),
-      );
+      authFails = 0;
+      pool.note429(egress, res.headers.get("retry-after"), now(), random);
       lastRes = res;
       if (attempts >= maxAttempts) break;
       continue;
     }
     if (res.status === 401 || res.status === 403) {
+      authFails += 1;
+      if (authFails >= 2) {
+        return { res, attempts, egressUrl: egress, provenance: "provider" };
+      }
       pool.bench(
         egress,
         benchDurationMs(
@@ -321,6 +427,14 @@ export async function fetchWithRotation(
       continue;
     }
     if (res.status >= 500) {
+      authFails = 0;
+      if (now() - pool.lastOkAt() < HEALTHY_RECENCY_MS) {
+        pool.bench(
+          egress,
+          FIVE_XX_BENCH_MS +
+            Math.floor(random() * (BENCH_JITTER_MS + 1)),
+        );
+      }
       pool.rotate();
       lastRes = res;
       if (attempts >= maxAttempts) break;

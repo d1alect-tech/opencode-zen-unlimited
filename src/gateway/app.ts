@@ -8,7 +8,8 @@
  * - `GET /v1/models`: dual ids (`oc/<id>` + `<id>`) from the registry list
  *   populated by the autoparser at runtime.
  * - `GET /api/health`: liveness.
- * - `GET /api/usage/proxy-logs`: watcher-compat minimal usage log.
+ * - `GET /api/usage/proxy-logs`: usage log with rotation provenance
+ *   (egressUrl, attempts, provenance per request).
  * - `GET /api/dashboard/providers/opencode`: keyless provider JSON.
  * - `GET /dashboard/providers/opencode`: minimal HTML page (no framework).
  *
@@ -42,8 +43,18 @@ import {
   type FetchImpl,
   type UpstreamRequestInit,
 } from "./forward";
-import { toClientSseResponse } from "./sse";
-import { createRotationPool, fetchWithRotation } from "./rotation";
+import {
+  passthroughSseResponse,
+  toClientChatCompletion,
+  toClientSseResponse,
+} from "./sse";
+import { resolveZenApiKey, zenUpstreamHeaders } from "./zen-identity.ts";
+import {
+  createRotationPool,
+  type ErrorProvenance,
+  fetchWithRotation,
+} from "./rotation";
+import { translateChatToResponses } from "./forward";
 import { buildOpencodeProvider, renderOpencodePage } from "./dashboard";
 
 export interface ProxyLogEntry {
@@ -53,6 +64,9 @@ export interface ProxyLogEntry {
   readonly model: string;
   readonly route: string;
   readonly status: number;
+  readonly egressUrl: string | undefined;
+  readonly attempts: number;
+  readonly provenance: ErrorProvenance;
 }
 
 export type UpstreamPath = "/v1/chat/completions" | "/v1/responses";
@@ -65,6 +79,23 @@ export interface CreateAppOptions {
 }
 
 const MAX_LOG_ENTRIES = 500;
+
+/**
+ * True when the upstream base points at this machine. Loopback upstreams
+ * (a local protocol proxy such as Headroom) are dialed direct: pushing
+ * 127.0.0.1 through a remote SOCKS/HTTP egress would ask that egress to
+ * reach back into this host and fail every attempt. Exported for tests.
+ */
+export function isLoopbackBase(base: string): boolean {
+  let host = "";
+  try {
+    host = new URL(base).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host === "localhost" || host === "::1" || host === "[::1]") return true;
+  return host.startsWith("127.");
+}
 
 function defaultFetchImpl(): FetchImpl {
   return createNodeFetchImpl({
@@ -95,7 +126,7 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     options.egresses ?? parseEgressUpstreams();
   const pool = createRotationPool(egresses);
   const dispatcherFor =
-    egresses.length === 0
+    egresses.length === 0 || isLoopbackBase(upstreamBase)
       ? undefined
       : (egressUrl: string): EgressAgent => agentFor(egressUrl);
   const logs: ProxyLogEntry[] = [];
@@ -146,13 +177,24 @@ export function createApp(options: CreateAppOptions = {}): Hono {
       c.req.header("accept") ?? null,
     );
     const route = resolveRoute(model, { inboundShape, models });
-    const outgoing: string = rewriteModelBody(rawText);
-    const { res: upstream } = await fetchWithRotation({
+    const outgoing: string =
+      route === "/responses" && inboundShape === "chat"
+        ? translateChatToResponses(rawText)
+        : rewriteModelBody(rawText);
+    const {
+      res: upstream,
+      attempts,
+      egressUrl,
+      provenance,
+    } = await fetchWithRotation({
       fetchImpl,
       url: `${upstreamBase}${route}`,
       init: {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...zenUpstreamHeaders({ apiKey: resolveZenApiKey() }),
+        },
         body: outgoing,
       },
       egresses,
@@ -167,10 +209,25 @@ export function createApp(options: CreateAppOptions = {}): Hono {
       model,
       route,
       status: upstream.status,
+      egressUrl,
+      attempts,
+      provenance,
     });
     if (logs.length > MAX_LOG_ENTRIES) logs.splice(0, logs.length - MAX_LOG_ENTRIES);
-    if (stream) return toClientSseResponse(upstream);
-    return bufferedPassthrough(upstream);
+    // Chat-only clients (openai-compatible) need Responses→chat bridging,
+    // but only when upstream actually served Responses. Responses-native
+    // clients and upstream chat routes pass through verbatim — translating
+    // them would corrupt the stream the SDK validates (response.created…).
+    const needsChatBridge: boolean =
+      route === "/responses" && inboundShape === "chat";
+    if (stream) {
+      return needsChatBridge
+        ? toClientSseResponse(upstream)
+        : passthroughSseResponse(upstream);
+    }
+    return needsChatBridge
+      ? toClientChatCompletion(upstream)
+      : bufferedPassthrough(upstream);
   };
 
   app.post("/v1/chat/completions", (c) =>

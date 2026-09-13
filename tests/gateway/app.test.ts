@@ -152,6 +152,73 @@ describe("upstream error mapping", () => {
   });
 });
 
+describe("chat bridge over upstream responses", () => {
+  const responsesSse =
+    'event: response.created\n' +
+    'data: {"type":"response.created","response":{"id":"resp_1","created_at":1700000000,"model":"muse-spark-1.3-contributor-free"}}\n\n' +
+    'event: response.output_text.delta\n' +
+    'data: {"type":"response.output_text.delta","delta":"hi"}\n\n' +
+    'event: response.completed\n' +
+    'data: {"type":"response.completed","response":{}}\n\n';
+  test("chat stream translates Responses events to chat chunks", async () => {
+    const { fetchImpl } = mockFetch(
+      () =>
+        new Response(responsesSse, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+    );
+    const app = createApp({ models: MODELS, fetchImpl });
+    const res = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify({
+        model: "oc/muse-spark-1.3-contributor-free",
+        messages: [{ role: "user", content: "ping" }],
+        stream: true,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('"object":"chat.completion.chunk"');
+    expect(text).toContain('"content":"hi"');
+    expect(text).toContain("data: [DONE]");
+    expect(text).not.toContain("response.output_text.delta");
+  });
+  test("chat buffered translates Responses object to chat completion", async () => {
+    const { fetchImpl } = mockFetch(() =>
+      jsonResponse({
+        id: "resp_2",
+        model: "muse-spark-1.3-contributor-free",
+        output: [
+          {
+            type: "message",
+            content: [{ type: "output_text", text: "pong" }],
+          },
+        ],
+        usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 },
+      }),
+    );
+    const app = createApp({ models: MODELS, fetchImpl });
+    const res = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "oc/muse-spark-1.3-contributor-free",
+        messages: [{ role: "user", content: "ping" }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      object: string;
+      choices: { message: { content: string }; finish_reason: string }[];
+    };
+    expect(body.object).toBe("chat.completion");
+    expect(body.choices[0]?.message.content).toBe("pong");
+    expect(body.choices[0]?.finish_reason).toBe("stop");
+  });
+});
+
 describe("SSE passthrough", () => {
   test("streaming sets SSE headers and pipes upstream bytes", async () => {
     const sseBody = 'data: {"a":1}\n\ndata: [DONE]\n\n';
@@ -218,11 +285,18 @@ describe("GET /api/usage/proxy-logs", () => {
     const res = await app.request("/api/usage/proxy-logs");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      logs: { status: number }[];
+      logs: {
+        status: number;
+        attempts: number;
+        provenance: string;
+        egressUrl: string | undefined;
+      }[];
       total: number;
     };
     expect(Array.isArray(body.logs)).toBe(true);
     expect(body.total).toBeGreaterThanOrEqual(1);
     expect(body.logs[0]?.status).toBe(200);
+    expect(body.logs[0]?.attempts).toBe(1);
+    expect(body.logs[0]?.provenance).toBe("provider");
   });
 });

@@ -79,7 +79,7 @@ export function renderOpencodePage(provider: DashboardProviderJson): string {
 <h2>Free models (${provider.models.length})</h2>
 <ul>${items}</ul>
 <p>JSON: <a href="/api/dashboard/providers/opencode">/api/dashboard/providers/opencode</a></p>
-<p>Watcher usage logs: <a href="/api/usage/proxy-logs">/api/usage/proxy-logs</a></p>
+<p>Usage logs: <a href="/api/usage/proxy-logs">/api/usage/proxy-logs</a></p>
 </body>
 </html>`;
 }

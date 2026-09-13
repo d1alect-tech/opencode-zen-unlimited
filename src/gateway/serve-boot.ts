@@ -28,6 +28,21 @@ export function checkServeGate(
 }
 
 /**
+ * Upstream base seam (`ZEN_UPSTREAM_BASE`, env-only). Unset/blank means the
+ * direct Zen base. Point it at a local protocol proxy (e.g. Headroom :8788,
+ * which itself forwards to Zen) for a double-proxy chain. Loopback bases
+ * bypass the egress pool (see createApp): tunneling 127.0.0.1 through a
+ * remote egress would ask that egress to reach back into this host.
+ */
+export function resolveUpstreamBase(
+  env: Record<string, string | undefined>,
+): string | undefined {
+  const raw: string | undefined = env["ZEN_UPSTREAM_BASE"]?.trim();
+  if (raw === undefined || raw === "") return undefined;
+  return raw;
+}
+
+/**
  * Boot the gateway. Applies the no-egress gate first:
  * - empty EGRESS_UPSTREAMS without --no-egress-direct -> stderr + return 1.
  * - empty with the flag -> loud warning, serve direct.
@@ -59,7 +74,7 @@ export async function startServe(argv: readonly string[]): Promise<number> {
   const snapshot = autoparser.getSnapshot();
   const models =
     snapshot.length > 0 ? autoparser.getRegistryEntry().models : OC_REGISTRY_ENTRY.models;
-  const app = createApp({ models });
+  const app = createApp({ models, upstreamBase: resolveUpstreamBase(process.env) });
 
   serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
     console.log(`gateway listening on http://${HOST}:${info.port}`);

@@ -3,9 +3,11 @@ import {
   benchDurationMs,
   createRotationPool,
   DEFAULT_BENCH_MS,
+  DIAL_FAIL_CUTOFF_MS,
   fetchWithRotation,
   MAX_BENCH_MS,
   parseRetryAfterMs,
+  QUOTA_BENCH_MS,
   type FetchWithRotationResult,
 } from "@/gateway/rotation";
 import type {
@@ -328,13 +330,26 @@ describe("fetchWithRotation fault-injection matrix", () => {
     expect(Number(retryAfter)).toBeGreaterThan(0);
   });
 
-  test("single benched egress yields gateway-own 429 with retry-after", async () => {
+  test("pre-benched pool yields gateway-own 429 with retry-after", async () => {
     let calls = 0;
     const fetchImpl: FetchImpl = () => {
       calls += 1;
       return Promise.resolve(jsonResponse({ error: "quota" }, 429));
     };
     const pool = createRotationPool([EGRESS_A]);
+    const first = await fetchWithRotation({
+      fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A],
+      pool,
+      random: () => 0,
+    });
+    expect(first.provenance).toBe("provider");
+    expect(first.res.status).toBe(429);
+    // With optimistic retry, a fully-benched pool still probes the
+    // least-benched egress instead of failing instantly. For a single
+    // egress that means one more provider attempt.
     const result = await fetchWithRotation({
       fetchImpl,
       url: "https://opencode.ai/zen/v1/responses",
@@ -343,20 +358,226 @@ describe("fetchWithRotation fault-injection matrix", () => {
       pool,
       random: () => 0,
     });
-    expect(calls).toBe(1);
-    expect(result.provenance).toBe("gateway");
+    expect(calls).toBe(2);
+    expect(result.provenance).toBe("provider");
     expect(result.res.status).toBe(429);
     expect(result.res.headers.get("retry-after")).not.toBeNull();
-    const body = (await result.res.json()) as {
-      error: { message: string; type: string };
-    };
-    expect(body.error.type).toBe("gateway_rate_limited");
-    expect(body.error.message).toContain("add-sub");
-    expect(body.error.message).toContain("zen add-sub");
-    expect(body.error.message).toContain("wait for reset");
-    expect(body.error.message).toContain(
-      `retry after ${result.res.headers.get("retry-after")} s`,
+  });
+
+  test("second 429 within strike window quarantines for QUOTA_BENCH_MS", async () => {
+    let nowMs = 10_000_000;
+    const pool = createRotationPool([EGRESS_A], () => nowMs);
+    const optsFor = (seq: { fetchImpl: FetchImpl }) => ({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A] as readonly string[],
+      pool,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    await fetchWithRotation(
+      optsFor(scriptFetch([jsonResponse({ error: "quota" }, 429)])),
     );
+    expect(pool.benchedUntil(EGRESS_A)).toBe(nowMs + DEFAULT_BENCH_MS);
+    nowMs += DEFAULT_BENCH_MS + 1_000;
+    await fetchWithRotation(
+      optsFor(scriptFetch([jsonResponse({ error: "quota" }, 429)])),
+    );
+    expect(pool.benchedUntil(EGRESS_A)).toBe(nowMs + QUOTA_BENCH_MS);
+  });
+
+  test("explicit Retry-After wins over quarantine escalation", async () => {
+    let nowMs = 20_000_000;
+    const pool = createRotationPool([EGRESS_A], () => nowMs);
+    const optsFor = (seq: { fetchImpl: FetchImpl }) => ({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A] as readonly string[],
+      pool,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    const scripted = () =>
+      scriptFetch([
+        jsonResponse({ error: "quota" }, 429, { "retry-after": "120" }),
+      ]);
+    await fetchWithRotation(optsFor(scripted()));
+    nowMs += 121_000;
+    await fetchWithRotation(optsFor(scripted()));
+    expect(pool.benchedUntil(EGRESS_A)).toBe(nowMs + 120_000);
+  });
+
+  test("attempts default to pool size", async () => {
+    const egresses = [
+      "http://127.0.0.1:18081",
+      "http://127.0.0.1:18082",
+      "http://127.0.0.1:18083",
+    ];
+    const pool = createRotationPool(egresses);
+    const seq = scriptFetch(egresses.map(() => jsonResponse({ error: "quota" }, 429)));
+    const result = await fetchWithRotation({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses,
+      pool,
+      random: () => 0,
+    });
+    expect(result.attempts).toBe(3);
+    expect(result.res.status).toBe(429);
+  });
+
+  test("two consecutive slow stalls abort early", async () => {
+    let nowMs = 80_000_000;
+    let calls = 0;
+    const fetchImpl: FetchImpl = () => {
+      calls += 1;
+      nowMs += 5_000;
+      return Promise.reject(new Error("timeout"));
+    };
+    const pool = createRotationPool(
+      [EGRESS_A, EGRESS_B, "http://127.0.0.1:18083"],
+      () => nowMs,
+    );
+    await expect(
+      fetchWithRotation({
+        fetchImpl,
+        url: "https://opencode.ai/zen/v1/responses",
+        init: baseInit,
+        egresses: [EGRESS_A, EGRESS_B, "http://127.0.0.1:18083"],
+        pool,
+        now: () => nowMs,
+        random: () => 0,
+      }),
+    ).rejects.toThrow("timeout");
+    expect(calls).toBe(2);
+  });
+
+  test("per-request deadline stops slow 429 chains", async () => {
+    let nowMs = 50_000_000;
+    const egresses = [
+      "http://127.0.0.1:18081",
+      "http://127.0.0.1:18082",
+      "http://127.0.0.1:18083",
+      "http://127.0.0.1:18084",
+      "http://127.0.0.1:18085",
+    ];
+    const pool = createRotationPool(egresses, () => nowMs);
+    const fetchImpl: FetchImpl = () => {
+      nowMs += 100_000;
+      return Promise.resolve(jsonResponse({ error: "quota" }, 429));
+    };
+    const result = await fetchWithRotation({
+      fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses,
+      pool,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    expect(result.attempts).toBe(3);
+    expect(result.res.status).toBe(429);
+  });
+
+  test("5xx benches 30s when another egress was recently healthy", async () => {
+    const nowMs = 30_000_000;
+    const pool = createRotationPool([EGRESS_A, EGRESS_B], () => nowMs);
+    const healthy = scriptFetch([jsonResponse({ output: "ok" }, 200)]);
+    await fetchWithRotation({
+      fetchImpl: healthy.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A, EGRESS_B],
+      pool,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    const sick = scriptFetch([
+      jsonResponse({ error: "boom" }, 500),
+      jsonResponse({ output: "ok" }, 200),
+    ]);
+    const result = await fetchWithRotation({
+      fetchImpl: sick.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A, EGRESS_B],
+      pool,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    expect(result.res.status).toBe(200);
+    expect(pool.benchedUntil(EGRESS_A)).toBe(nowMs + 30_000);
+  });
+
+  test("5xx without recent success rotates with no bench", async () => {
+    const nowMs = 40_000_000;
+    const pool = createRotationPool([EGRESS_A, EGRESS_B], () => nowMs);
+    const seq = scriptFetch([
+      jsonResponse({ error: "boom" }, 500),
+      jsonResponse({ output: "ok" }, 200),
+    ]);
+    const result = await fetchWithRotation({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A, EGRESS_B],
+      pool,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    expect(result.res.status).toBe(200);
+    expect(pool.benchedUntil(EGRESS_A)).toBe(0);
+  });
+
+  test("second identical 401/403 returns immediately without benching", async () => {
+    const nowMs = 60_000_000;
+    const pool = createRotationPool([EGRESS_A, EGRESS_B], () => nowMs);
+    const seq = scriptFetch([
+      jsonResponse({ error: "denied" }, 401),
+      jsonResponse({ error: "denied" }, 401),
+      jsonResponse({ output: "ok" }, 200),
+    ]);
+    const result = await fetchWithRotation({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A, EGRESS_B],
+      pool,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    expect(result.res.status).toBe(401);
+    expect(result.attempts).toBe(2);
+    expect(pool.benchedUntil(EGRESS_A)).toBeGreaterThan(0);
+    expect(pool.benchedUntil(EGRESS_B)).toBe(0);
+  });
+
+  test("fast rejects do not trigger early timeout abort", async () => {
+    const nowMs = 70_000_000;
+    expect(DIAL_FAIL_CUTOFF_MS).toBeGreaterThan(0);
+    const pool = createRotationPool(
+      [EGRESS_A, EGRESS_B, "http://127.0.0.1:18083"],
+      () => nowMs,
+    );
+    const seq = scriptFetch([
+      new Error("dial refused"),
+      new Error("dial refused"),
+      jsonResponse({ output: "ok" }, 200),
+    ]);
+    const result = await fetchWithRotation({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A, EGRESS_B, "http://127.0.0.1:18083"],
+      pool,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    expect(result.res.status).toBe(200);
+    expect(result.attempts).toBe(3);
   });
 
   test("empty pool stays direct with a single 1:1 attempt", async () => {
