@@ -8,6 +8,7 @@ import {
   MAX_BENCH_MS,
   parseRetryAfterMs,
   QUOTA_BENCH_MS,
+  REGION_BENCH_MS,
   type FetchWithRotationResult,
 } from "@/gateway/rotation";
 import type {
@@ -598,6 +599,67 @@ describe("fetchWithRotation fault-injection matrix", () => {
     });
     expect(result.res.status).toBe(200);
     expect(pool.benchedUntil(EGRESS_A)).toBe(0);
+  });
+
+  test("RegionError 403 benches the egress long and rotates to a working one", async () => {
+    const nowMs = 90_000_000;
+    const { seen, dispatcherFor } = trackingDispatcher();
+    const pool = createRotationPool([EGRESS_A, EGRESS_B], () => nowMs);
+    const seq = scriptFetch([
+      jsonResponse(
+        { error: { type: "RegionError", message: "This model is not available in your country." } },
+        403,
+      ),
+      jsonResponse({ output: "ok" }, 200),
+    ]);
+    const result = await fetchWithRotation({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A, EGRESS_B],
+      pool,
+      dispatcherFor,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    expect(result.res.status).toBe(200);
+    expect(result.attempts).toBe(2);
+    expect(seen).toEqual([EGRESS_A, EGRESS_B]);
+    expect(pool.benchedUntil(EGRESS_A)).toBe(nowMs + REGION_BENCH_MS);
+  });
+
+  test("two RegionErrors on different egresses keep rotating to a working one", async () => {
+    const nowMs = 91_000_000;
+    const { seen, dispatcherFor } = trackingDispatcher();
+    const pool = createRotationPool([EGRESS_A, EGRESS_B, "http://127.0.0.1:18083"], () => nowMs);
+    const region = jsonResponse(
+      { error: { type: "RegionError", message: "This model is not available in your country." } },
+      403,
+    );
+    const seq = scriptFetch([region, region, jsonResponse({ output: "ok" }, 200)]);
+    const result = await fetchWithRotation({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses: [EGRESS_A, EGRESS_B, "http://127.0.0.1:18083"],
+      pool,
+      dispatcherFor,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    expect(result.res.status).toBe(200);
+    expect(result.attempts).toBe(3);
+    expect(seen).toEqual([EGRESS_A, EGRESS_B, "http://127.0.0.1:18083"]);
+    expect(pool.benchedUntil(EGRESS_A)).toBe(nowMs + REGION_BENCH_MS);
+    expect(pool.benchedUntil(EGRESS_B)).toBe(nowMs + REGION_BENCH_MS);
+  });
+
+  test("region-blocked egress is skipped by later picks (long bench)", async () => {
+    const nowMs = 92_000_000;
+    const pool = createRotationPool([EGRESS_A, EGRESS_B], () => nowMs);
+    pool.bench(EGRESS_A, REGION_BENCH_MS);
+    expect(pool.pick()).toBe(EGRESS_B);
+    expect(pool.benchedUntil(EGRESS_A)).toBe(nowMs + REGION_BENCH_MS);
   });
 
   test("second identical 401/403 returns immediately without benching", async () => {
