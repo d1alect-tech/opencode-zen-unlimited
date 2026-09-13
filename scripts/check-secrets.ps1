@@ -8,7 +8,7 @@ $Violations = @()
 # 1. Real-looking secret assignments. Code-shape lines (field refs, decoders, env reads,
 #    comparisons) are skipped — only literal values count.
 $AssignRe = '(?i)(password|passwd|api[_-]?key|secret|RR_WATCH_TOKEN|HY2_PASSWORD|EGRESS_SUB_URL)\s*[:=]\s*["'']?(?!YOUR_)(?!example\.com)([A-Za-z0-9\-_./:?&=]{8,})["'']?'
-$CodeShapeRe = 'node\.|process\.env|decodeURIComponent|userinfo|String\(|p\[|===|!==|\?\?|typeof|=>|function |import |^\s*//|\* '
+$CodeShapeRe = 'node\.|process\.env|decodeURIComponent|userinfo|String\(|p\[|===|!==|\?\?|typeof|=>|function |import |\.\.\.|^\s*//|\* '
 $ScanGlobs = @('src', 'sing-box', 'scripts', 'docs', 'opencode', '*.md', '*.jsonc')
 foreach ($g in $ScanGlobs) {
   $base = Join-Path $Root $g
