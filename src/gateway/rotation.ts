@@ -68,6 +68,22 @@ export const FIVE_XX_BENCH_MS = 30_000;
 export const HEALTHY_RECENCY_MS = 300_000;
 /** Extra random spread added to every bench window. */
 export const BENCH_JITTER_MS = 1_000;
+/** Long bench for a region-blocked egress (geo-restricted model). */
+export const REGION_BENCH_MS = 86_400_000;
+
+/**
+ * Region markers in an upstream 403/401 body: Zen rejects geo-restricted
+ * models with `RegionError` / "not available in your country". Detecting
+ * them separately from request-shaped auth failures keeps the pool alive
+ * (one geo-blocked egress must not poison the whole rotation).
+ */
+export function isRegionBlockedBody(bodyText: string): boolean {
+  return (
+    bodyText.includes("RegionError") ||
+    bodyText.includes("not available in your country") ||
+    bodyText.includes("not available in your region")
+  );
+}
 
 /**
  * Parse a `Retry-After` header into milliseconds.
@@ -235,8 +251,21 @@ export interface FetchWithRotationResult {
   readonly provenance: ErrorProvenance;
 }
 
-/** Seconds until the least-benched egress frees up (min 1). */
-function gatewayRetryAfterSec(
+/**
+ * Read a Response body as text without consuming the original stream
+ * (clone keeps `res` usable for 1:1 error surfacing later). Falls back
+ * to "" on any read failure so callers degrade to non-region handling.
+ */
+async function safeResponseText(res: Response): Promise<string> {
+  try {
+    const clone = res.clone();
+    return await clone.text();
+  } catch {
+    return "";
+  }
+}
+
+/** Seconds until the least-benched egress frees up (min 1). */function gatewayRetryAfterSec(
   pool: RotationPool,
   egresses: readonly string[],
   nowMs: number,
@@ -424,6 +453,20 @@ export async function fetchWithRotation(
       continue;
     }
     if (res.status === 401 || res.status === 403) {
+      // Region-blocked model (geo restriction) is egress-local, not
+      // request-shaped: bench it for a full day and rotate onward so one
+      // bad node can't poison the pool. Only request-shaped auth failures
+      // (missing session, bad model) fast-bail on the second hit.
+      const bodyText: string = await safeResponseText(res);
+      if (isRegionBlockedBody(bodyText)) {
+        pool.bench(
+          egress,
+          REGION_BENCH_MS + Math.floor(random() * (BENCH_JITTER_MS + 1)),
+        );
+        lastRes = res;
+        if (attempts >= maxAttempts) break;
+        continue;
+      }
       authFails += 1;
       if (authFails >= 2) {
         return { res, attempts, egressUrl: egress, provenance: "provider" };
