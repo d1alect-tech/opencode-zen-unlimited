@@ -347,9 +347,8 @@ describe("fetchWithRotation fault-injection matrix", () => {
     });
     expect(first.provenance).toBe("provider");
     expect(first.res.status).toBe(429);
-    // With optimistic retry, a fully-benched pool still probes the
-    // least-benched egress instead of failing instantly. For a single
-    // egress that means one more provider attempt.
+    // Fully-benched pool gets exactly one optimistic probe, then a
+    // synthetic gateway 429 with retry-after (storm cap).
     const result = await fetchWithRotation({
       fetchImpl,
       url: "https://opencode.ai/zen/v1/responses",
@@ -359,9 +358,78 @@ describe("fetchWithRotation fault-injection matrix", () => {
       random: () => 0,
     });
     expect(calls).toBe(2);
-    expect(result.provenance).toBe("provider");
+    expect(result.attempts).toBeLessThanOrEqual(1);
+    expect(result.provenance).toBe("gateway");
     expect(result.res.status).toBe(429);
-    expect(result.res.headers.get("retry-after")).not.toBeNull();
+    const retryAfter = result.res.headers.get("retry-after");
+    expect(retryAfter).not.toBeNull();
+    expect(Number(retryAfter)).toBeGreaterThan(0);
+  });
+
+  test("fully-benched 2-egress pool caps optimistic probes at one", async () => {
+    const egresses = [EGRESS_A, EGRESS_B];
+    const pool = createRotationPool(egresses);
+    await fetchWithRotation({
+      fetchImpl: scriptFetch([
+        jsonResponse({ error: "quota" }, 429),
+        jsonResponse({ error: "quota" }, 429),
+      ]).fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses,
+      pool,
+      random: () => 0,
+    });
+    let calls = 0;
+    const counting: FetchImpl = () => {
+      calls += 1;
+      return Promise.resolve(jsonResponse({ error: "quota" }, 429));
+    };
+    const result = await fetchWithRotation({
+      fetchImpl: counting,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses,
+      pool,
+      random: () => 0,
+    });
+    expect(calls).toBe(1);
+    expect(result.attempts).toBeLessThanOrEqual(1);
+    expect(result.provenance).toBe("gateway");
+    expect(result.res.status).toBe(429);
+    expect(Number(result.res.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  test("fully-benched 11-egress pool never storms attempts:11", async () => {
+    const egresses = Array.from({ length: 11 }, (_, i) => `http://127.0.0.1:${18_081 + i}`);
+    const pool = createRotationPool(egresses);
+    await fetchWithRotation({
+      fetchImpl: scriptFetch(
+        egresses.map(() => jsonResponse({ error: "quota" }, 429)),
+      ).fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses,
+      pool,
+      random: () => 0,
+    });
+    let calls = 0;
+    const counting: FetchImpl = () => {
+      calls += 1;
+      return Promise.resolve(jsonResponse({ error: "quota" }, 429));
+    };
+    const result = await fetchWithRotation({
+      fetchImpl: counting,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: baseInit,
+      egresses,
+      pool,
+      random: () => 0,
+    });
+    expect(calls).toBeLessThanOrEqual(1);
+    expect(result.attempts).toBeLessThanOrEqual(1);
+    expect(result.provenance).toBe("gateway");
+    expect(result.res.status).toBe(429);
   });
 
   test("second 429 within strike window quarantines for QUOTA_BENCH_MS", async () => {
