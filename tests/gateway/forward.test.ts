@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   resolveRoute,
+  sanitizeResponsesBody,
   stripOcPrefix,
   translateChatToResponses,
   wantsStreaming,
@@ -187,6 +188,47 @@ describe("translateChatToResponses", () => {
 
   test("non-JSON passes through untouched", () => {
     expect(translateChatToResponses("not json")).toBe("not json");
+  });
+});
+
+describe("sanitizeResponsesBody", () => {
+  test("drops reasoning items, keeps messages+tool calls, strips oc/", () => {
+    const out = JSON.parse(
+      sanitizeResponsesBody(
+        JSON.stringify({
+          model: "oc/muse-spark-1.3-contributor-free",
+          previous_response_id: "resp_old",
+          input: [
+            { role: "user", content: "hi" },
+            {
+              type: "reasoning",
+              id: "rs_old",
+              encrypted_content: "SECRET",
+              summary: [],
+            },
+            { type: "function_call", call_id: "c1", name: "t", arguments: "{}" },
+          ],
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(out["model"]).toBe("muse-spark-1.3-contributor-free");
+    expect(out["input"]).toEqual([
+      { role: "user", content: "hi" },
+      { type: "function_call", call_id: "c1", name: "t", arguments: "{}" },
+    ]);
+    expect("previous_response_id" in out).toBe(false);
+  });
+
+  test("no input array passes through with model stripped", () => {
+    const out = JSON.parse(
+      sanitizeResponsesBody(JSON.stringify({ model: "oc/x", input: "ping" })),
+    ) as Record<string, unknown>;
+    expect(out["model"]).toBe("x");
+    expect(out["input"]).toBe("ping");
+  });
+
+  test("non-JSON passes through untouched", () => {
+    expect(sanitizeResponsesBody("not json")).toBe("not json");
   });
 });
 
