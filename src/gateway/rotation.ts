@@ -124,10 +124,22 @@ export function benchDurationMs(
   return base + Math.floor(random() * (BENCH_JITTER_MS + 1));
 }
 
+/** Per-egress bench state for `zen pool` visibility. */
+export interface PoolEgressState {
+  readonly egressUrl: string;
+  readonly healthy: boolean;
+  /** Bench time left in ms (0 when healthy). */
+  readonly benchedMsRemaining: number;
+}
+
 export interface RotationPool {
   readonly size: number;
   /** Next un-benched egress from the sticky pin; `undefined` when all benched. */
   pick(): string | undefined;
+  /** Bench state per egress, in pool order (drives `zen pool`). */
+  snapshot(): PoolEgressState[];
+  /** Clear all benches plus 429 strike memory; returns benched count. */
+  clearBenches(): number;
   /** Bench an egress for `ms` from now. */
   bench(egressUrl: string, ms: number): void;
   /** Bench expiry timestamp (0 when never benched). */
@@ -189,6 +201,27 @@ export function createRotationPool(
     },
     bench(egressUrl: string, ms: number): void {
       cooldownUntil.set(egressUrl, now() + ms);
+    },
+    snapshot(): PoolEgressState[] {
+      const t: number = now();
+      return list.map((egressUrl: string): PoolEgressState => {
+        const remaining: number = (cooldownUntil.get(egressUrl) ?? 0) - t;
+        return {
+          egressUrl,
+          healthy: remaining <= 0,
+          benchedMsRemaining: Math.max(0, remaining),
+        };
+      });
+    },
+    clearBenches(): number {
+      const t: number = now();
+      let benched = 0;
+      for (const until of cooldownUntil.values()) {
+        if (until > t) benched += 1;
+      }
+      cooldownUntil.clear();
+      last429At.clear();
+      return benched;
     },
     benchedUntil(egressUrl: string): number {
       return cooldownUntil.get(egressUrl) ?? 0;

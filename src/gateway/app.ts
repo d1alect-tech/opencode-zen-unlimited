@@ -10,6 +10,9 @@
  * - `GET /api/health`: liveness.
  * - `GET /api/usage/proxy-logs`: usage log with rotation provenance
  *   (egressUrl, attempts, provenance per request).
+ * - `GET /api/pool`: per-egress bench state (`zen pool` visibility).
+ * - `POST /api/pool/reset`: clear all benches without a restart.
+ *   (`zen pool --reset`; same relief as a restart, minus the downtime).
  * - `GET /api/dashboard/providers/opencode`: keyless provider JSON.
  * - `GET /dashboard/providers/opencode`: minimal HTML page (no framework).
  *
@@ -151,6 +154,17 @@ export function createApp(options: CreateAppOptions = {}): Hono {
   app.get("/api/usage/proxy-logs", (c) =>
     c.json({ logs: [...logs], total: logs.length }, 200),
   );
+
+  app.get("/api/pool", (c) => {
+    const entries = pool.snapshot();
+    const healthy = entries.filter((e) => e.healthy).length;
+    return c.json({ total: entries.length, healthy, entries }, 200);
+  });
+
+  app.post("/api/pool/reset", (c) => {
+    const cleared: number = pool.clearBenches();
+    return c.json({ reset: true, cleared }, 200);
+  });
 
   app.get("/api/dashboard/providers/opencode", (c) =>
     c.json(buildOpencodeProvider(models), 200),

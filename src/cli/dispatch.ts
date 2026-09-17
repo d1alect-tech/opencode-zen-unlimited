@@ -4,6 +4,7 @@ import { runAddProxy } from "./commands/add-proxy.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runSetup } from "./commands/setup.ts";
 import { runLogs } from "./commands/logs.ts";
+import { runPool } from "./commands/pool.ts";
 import { runStatus } from "./commands/status.ts";
 import { formatHelp } from "./help.ts";
 import { parseCliArgs, type Subcommand } from "./parser.ts";
@@ -33,6 +34,7 @@ export const DISPATCH: Record<Subcommand, CliHandler> = {
       envPath: join(process.cwd(), ".env"),
     }),
   logs: (rest) => runLogs(rest),
+  pool: (rest) => runPool(rest),
   serve: (rest) => startServe(rest),
 };
 

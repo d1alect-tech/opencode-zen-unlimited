@@ -556,6 +556,17 @@ bun run src/index.ts logs gateway --tail 20
 # expected: last 20 gateway log lines (pinned/rotate lines for opencode.ai* traffic)
 ```
 
+**pool** — per-egress bench state from the live gateway. `--reset` clears all benches without a restart (same relief a restart gave, minus the downtime):
+
+```powershell
+bun run src/index.ts pool
+bun run src/index.ts pool --reset
+```
+
+```text
+# expected: ok/bench rows per egress plus a pool: H/T healthy summary
+```
+
 **serve** — start the gateway. Refuses with zero egress nodes (exit 1) unless `--no-egress-direct` (local dev only):
 
 ```powershell

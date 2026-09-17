@@ -300,3 +300,76 @@ describe("GET /api/usage/proxy-logs", () => {
     expect(body.logs[0]?.provenance).toBe("provider");
   });
 });
+
+describe("GET /api/pool", () => {
+  test("lists per-egress bench state", async () => {
+    const app = createApp({
+      models: MODELS,
+      egresses: ["http://127.0.0.1:18081", "http://127.0.0.1:18082"],
+      fetchImpl: () => Promise.resolve(new Response("x")),
+    });
+    const res = await app.request("/api/pool");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      total: number;
+      healthy: number;
+      entries: { egressUrl: string; healthy: boolean; benchedMsRemaining: number }[];
+    };
+    expect(body.total).toBe(2);
+    expect(body.healthy).toBe(2);
+    expect(body.entries.map((e) => e.egressUrl)).toEqual([
+      "http://127.0.0.1:18081",
+      "http://127.0.0.1:18082",
+    ]);
+    expect(body.entries.every((e) => e.healthy)).toBe(true);
+  });
+
+  test("reflects benches after an upstream 429", async () => {
+    const { fetchImpl } = mockFetch(() => jsonResponse({ error: "quota" }, 429));
+    const app = createApp({
+      models: MODELS,
+      egresses: ["http://127.0.0.1:18081"],
+      fetchImpl,
+    });
+    const upstream = await app.request("/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "oc/big-pickle", input: "ping" }),
+    });
+    expect(upstream.status).toBe(429);
+    const res = await app.request("/api/pool");
+    const body = (await res.json()) as {
+      total: number;
+      healthy: number;
+      entries: { egressUrl: string; healthy: boolean; benchedMsRemaining: number }[];
+    };
+    expect(body.total).toBe(1);
+    expect(body.healthy).toBe(0);
+    expect(body.entries[0]?.healthy).toBe(false);
+    expect(body.entries[0]?.benchedMsRemaining).toBeGreaterThan(0);
+  });
+});
+
+describe("POST /api/pool/reset", () => {
+  test("clears benches without a restart", async () => {
+    const { fetchImpl } = mockFetch(() => jsonResponse({ error: "quota" }, 429));
+    const app = createApp({
+      models: MODELS,
+      egresses: ["http://127.0.0.1:18081"],
+      fetchImpl,
+    });
+    await app.request("/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "oc/big-pickle", input: "ping" }),
+    });
+    const reset = await app.request("/api/pool/reset", { method: "POST" });
+    expect(reset.status).toBe(200);
+    const resetBody = (await reset.json()) as { reset: boolean; cleared: number };
+    expect(resetBody.reset).toBe(true);
+    expect(resetBody.cleared).toBe(1);
+    const res = await app.request("/api/pool");
+    const body = (await res.json()) as { healthy: number };
+    expect(body.healthy).toBe(1);
+  });
+});

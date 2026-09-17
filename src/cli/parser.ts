@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 
-export const SUBCOMMANDS = ["doctor", "status", "setup", "add-sub", "add-proxy", "logs", "serve"] as const;
+export const SUBCOMMANDS = ["doctor", "status", "setup", "add-sub", "add-proxy", "logs", "pool", "serve"] as const;
 
 export type Subcommand = (typeof SUBCOMMANDS)[number];
 
@@ -30,6 +30,7 @@ export const USAGE: string = [
   "  add-sub   Add a subscription link",
   "  add-proxy Add purchased proxy URL(s) to EGRESS_UPSTREAMS",
   "  logs      Tail gateway and relay logs",
+  "  pool      Show egress pool bench state",
   "  serve     Start the gateway (refuses with zero egress nodes)",
   "",
   "Options:",
@@ -83,6 +84,16 @@ export const COMMAND_HELP: Record<Subcommand, string> = {
     "",
     "Options:",
     "  --name <prefix>  Prefix added outbound tags (e.g. --name t9).",
+    "  -h, --help  Show this help.",
+  ].join("\n"),
+  pool: [
+    "Usage: zen pool [--json] [--reset] [-h]",
+    "",
+    "Show per-egress bench state from the live gateway.",
+    "",
+    "Options:",
+    "  --json   Machine-readable state {total,healthy,entries[]}",
+    "  --reset  Clear all benches first (no restart needed).",
     "  -h, --help  Show this help.",
   ].join("\n"),
   logs: [
@@ -174,6 +185,23 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli {
       rest = pass2.positionals.slice(1);
       if (pass2.values["json"] === true) rest.push("--json");
       if (pass2.values["verbose"] === true) rest.push("--verbose");
+    } else if (subcommand === "pool") {
+      // Pool owns --json/--reset: accept them here, re-encode into rest
+      // so the command handler can parse them.
+      const pass2 = parseArgs({
+        args,
+        strict: true,
+        allowPositionals: true,
+        options: {
+          help: { type: "boolean", short: "h", default: false },
+          json: { type: "boolean", default: false },
+          reset: { type: "boolean", default: false },
+        },
+      });
+      help = pass2.values["help"] === true;
+      rest = pass2.positionals.slice(1);
+      if (pass2.values["json"] === true) rest.push("--json");
+      if (pass2.values["reset"] === true) rest.push("--reset");
     } else if (subcommand === "status") {
       // Status owns --json/--self-heal/--verbose: accept them here, re-encode
       // into rest so the command handler can parse them.

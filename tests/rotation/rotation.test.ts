@@ -737,3 +737,26 @@ describe("fetchWithRotation fault-injection matrix", () => {
     expect(await result.res.json()).toEqual({ error: "quota" });
   });
 });
+
+describe("pool introspection (zen pool)", () => {
+  test("snapshot reports healthy vs benched with remaining ms", () => {
+    const startMs = 100_000;
+    let nowMs = startMs;
+    const pool = createRotationPool([EGRESS_A, EGRESS_B], () => nowMs);
+    pool.bench(EGRESS_A, 60_000);
+    expect(pool.snapshot()).toEqual([
+      { egressUrl: EGRESS_A, healthy: false, benchedMsRemaining: 60_000 },
+      { egressUrl: EGRESS_B, healthy: true, benchedMsRemaining: 0 },
+    ]);
+    nowMs = startMs + 61_000;
+    expect(pool.snapshot().every((e) => e.healthy)).toBe(true);
+  });
+
+  test("clearBenches resets quarantines and strike memory", () => {
+    const pool = createRotationPool([EGRESS_A, EGRESS_B]);
+    pool.bench(EGRESS_A, 60_000);
+    expect(pool.clearBenches()).toBe(1);
+    expect(pool.snapshot().every((e) => e.healthy)).toBe(true);
+    expect(pool.clearBenches()).toBe(0);
+  });
+});
