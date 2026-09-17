@@ -35,7 +35,7 @@ Use these words consistently in code, tests, and docs:
 | relay pool | Sticky SOCKS5 pool on :1090 |
 | egress | One outbound country endpoint (:1081-:1086) |
 | pin | Pool cursor: each pick advances past the served egress |
-| rotation | Consecutive requests cycle over healthy egresses; 429s bench one and move on |
+| rotation | Consecutive requests cycle over healthy egresses; 429s bench one and move on; any 200 lifts that egress bench (transient bursts self-heal) |
 | watcher | 429-watcher, polls usage logs with a cooldown |
 | autoparser | Live free-model poller feeding the registry |
 

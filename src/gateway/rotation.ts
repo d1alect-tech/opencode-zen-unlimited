@@ -140,6 +140,12 @@ export interface RotationPool {
   snapshot(): PoolEgressState[];
   /** Clear all benches plus 429 strike memory; returns benched count. */
   clearBenches(): number;
+  /**
+   * Lift one egress bench (a 200 proves it healthy — stale benches from
+   * transient upstream bursts must not outlive the recovery). Strike
+   * memory for that egress goes too, so the next 429 starts at strike one.
+   */
+  markHealthy(egressUrl: string): void;
   /** Bench an egress for `ms` from now. */
   bench(egressUrl: string, ms: number): void;
   /** Bench expiry timestamp (0 when never benched). */
@@ -222,6 +228,10 @@ export function createRotationPool(
       cooldownUntil.clear();
       last429At.clear();
       return benched;
+    },
+    markHealthy(egressUrl: string): void {
+      cooldownUntil.delete(egressUrl);
+      last429At.delete(egressUrl);
     },
     benchedUntil(egressUrl: string): number {
       return cooldownUntil.get(egressUrl) ?? 0;
@@ -480,6 +490,7 @@ export async function fetchWithRotation(
     stalls = 0;
     if (res.ok) {
       pool.noteOk(now());
+      pool.markHealthy(egress);
       return { res, attempts, egressUrl: egress, provenance: "provider" };
     }
     if (res.status === 429) {

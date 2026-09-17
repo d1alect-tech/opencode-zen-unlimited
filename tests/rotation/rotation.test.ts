@@ -760,3 +760,39 @@ describe("pool introspection (zen pool)", () => {
     expect(pool.clearBenches()).toBe(0);
   });
 });
+
+describe("self-healing benches", () => {
+  test("markHealthy lifts one egress bench, leaves others", () => {
+    const pool = createRotationPool([EGRESS_A, EGRESS_B]);
+    pool.bench(EGRESS_A, 60_000);
+    pool.bench(EGRESS_B, 60_000);
+    pool.markHealthy(EGRESS_A);
+    const snap = pool.snapshot();
+    expect(snap).toEqual([
+      { egressUrl: EGRESS_A, healthy: true, benchedMsRemaining: 0 },
+      { egressUrl: EGRESS_B, healthy: false, benchedMsRemaining: 60_000 },
+    ]);
+  });
+
+  test("a 200 through the optimistic probe heals that egress", async () => {
+    const nowMs = 200_000_000;
+    const pool = createRotationPool([EGRESS_A], () => nowMs);
+    pool.bench(EGRESS_A, REGION_BENCH_MS);
+    const seq = scriptFetch([jsonResponse({ output: "ok" }, 200)]);
+    const result = await fetchWithRotation({
+      fetchImpl: seq.fetchImpl,
+      url: "https://opencode.ai/zen/v1/responses",
+      init: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+      egresses: [EGRESS_A],
+      pool,
+      now: () => nowMs,
+      random: () => 0,
+    });
+    expect(result.res.status).toBe(200);
+    expect(pool.snapshot()[0]?.healthy).toBe(true);
+  });
+});
