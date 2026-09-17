@@ -153,10 +153,13 @@ export interface RotationPool {
 }
 
 /**
- * Sticky-pin pool mirroring the relay `createPinnedPicker` semantics:
- * the pin starts at index 0 and `pick()` advances it to the first
- * un-benched egress. Shared across requests by the caller so benches
- * persist beyond a single forward.
+ * Round-robin pool over the healthy egresses: the pin starts at index 0
+ * and every `pick()` advances it past the returned egress, so consecutive
+ * requests spread across node IPs and per-IP free quota burns evenly
+ * instead of concentrating on one egress (sticky pin did that and made
+ * single-IP exhaustion the common case). Benched egresses are skipped;
+ * shared across requests by the caller so benches persist beyond a
+ * single forward.
  */
 export function createRotationPool(
   egresses: readonly string[],
@@ -178,7 +181,7 @@ export function createRotationPool(
         const idx: number = (pinnedIdx + k) % list.length;
         const candidate: string | undefined = list[idx];
         if (candidate !== undefined && !isBenched(candidate)) {
-          pinnedIdx = idx;
+          pinnedIdx = (idx + 1) % list.length;
           return candidate;
         }
       }
@@ -434,7 +437,8 @@ export async function fetchWithRotation(
       attempts += 1;
       authFails = 0;
       if (now() - attemptStartMs >= DIAL_FAIL_CUTOFF_MS) stalls += 1;
-      pool.rotate();
+      // No rotate(): pick() already advanced past this egress and the bench
+      // above excludes it — rotating again would skip a healthy egress.
       if (stalls >= MAX_CONSECUTIVE_TIMEOUTS) throw err;
       if (attempts >= maxAttempts) throw err;
       continue;
@@ -493,7 +497,7 @@ export async function fetchWithRotation(
             Math.floor(random() * (BENCH_JITTER_MS + 1)),
         );
       }
-      pool.rotate();
+      // No rotate(): pick() already advanced past this egress (see above).
       lastRes = res;
       if (attempts >= maxAttempts) break;
       continue;

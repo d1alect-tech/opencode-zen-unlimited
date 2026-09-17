@@ -31,7 +31,7 @@ Rules: secrets in env only, never commit; show me each command and its output; i
 
 ## What, who, and non-goals
 
-**What.** Your OpenCode talks to a gateway on your own PC (`http://localhost:20128/v1`). The gateway sends Zen traffic through a relay pool (`socks5://127.0.0.1:1090`) and out via sing-box Hysteria2 nodes in 6 countries. Per-IP free quota spreads across those nodes, and Zen traffic sticks to one egress until a real 429 forces a rotation.
+**What.** Your OpenCode talks to a gateway on your own PC (`http://localhost:20128/v1`). The gateway sends Zen traffic through a relay pool (`socks5://127.0.0.1:1090`) and out via sing-box Hysteria2 nodes in 6 countries. Per-IP free quota spreads across those nodes: the gateway cycles consecutive requests over healthy egresses, and 429s bench an egress while rotation continues on the rest.
 
 ```text
 OpenCode (provider "oc")
@@ -71,7 +71,7 @@ OpenCode (provider "oc")
 - `zen status` shows process liveness, and `--self-heal` restarts dead ones.
 - `zen logs` tails sing-box, relay, or gateway logs.
 - `zen serve` starts the gateway and refuses to run with zero egress nodes (exit 1) unless you pass `--no-egress-direct` for local dev.
-- Sticky egress pin with 429-watcher rotation and a cooldown between rotations.
+- Round-robin egress spread with 429 benching plus 429-watcher rotation and a cooldown between rotations.
 - One-file Windows autostart installer plus a watchdog that self-heals every 5 minutes.
 - Keyless `oc` provider block for OpenCode with dual model ids (`oc/<id>` plus bare `<id>`).
 | `RR_COOLDOWN_MS` | Cooldown between rotations | `900000` |

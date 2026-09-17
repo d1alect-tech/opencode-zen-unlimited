@@ -110,11 +110,18 @@ describe("benchDurationMs", () => {
 });
 
 describe("createRotationPool", () => {
-  test("pins the first egress, skips benched ones", () => {
+  test("starts at the first egress, skips benched ones", () => {
     const pool = createRotationPool([EGRESS_A, EGRESS_B]);
     expect(pool.pick()).toBe(EGRESS_A);
     pool.bench(EGRESS_A, 60_000);
     expect(pool.pick()).toBe(EGRESS_B);
+  });
+
+  test("cycles consecutive picks across healthy egresses (quota spread)", () => {
+    const pool = createRotationPool([EGRESS_A, EGRESS_B]);
+    expect(pool.pick()).toBe(EGRESS_A);
+    expect(pool.pick()).toBe(EGRESS_B);
+    expect(pool.pick()).toBe(EGRESS_A);
   });
 
   test("returns undefined when every egress is benched", () => {
@@ -578,7 +585,9 @@ describe("fetchWithRotation fault-injection matrix", () => {
       random: () => 0,
     });
     expect(result.res.status).toBe(200);
-    expect(pool.benchedUntil(EGRESS_A)).toBe(nowMs + 30_000);
+    // Round-robin: the healthy probe took EGRESS_A, so the sick fetch lands
+    // on EGRESS_B and benches it.
+    expect(pool.benchedUntil(EGRESS_B)).toBe(nowMs + 30_000);
   });
 
   test("5xx without recent success rotates with no bench", async () => {
