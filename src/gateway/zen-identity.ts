@@ -1,32 +1,62 @@
 /**
  * Public OpenCode CLI identity for keyless Zen calls.
  *
- * Upstream `https://opencode.ai/zen` rejects anonymous relays with
- * `{ type: "MissingSessionID", message: "Error from provider (Console):
- * OpenCode's free tier can only be used in OpenCode" }`. The official CLI
- * is accepted keyless when it presents its public identity: `Bearer public`
- * plus `User-Agent: opencode/...` and per-request `X-Opencode-Request` /
- * `X-Opencode-Session` ids (mirrored from the community zenProxy
- * implementation; upstream treats these as the OpenCode client).
+ * Upstream `https://opencode.ai/zen` gates the anonymous free tier twice
+ * (both verified live 2026-09-17, previously 403 FreeTierError):
+ * 1. `X-Opencode-Session` must carry the canonical session shape
+ *    `ses_` + 12 lowercase hex + 14 Base62 — random ids are rejected.
+ * 2. `User-Agent` must report OpenCode >= 1.17.0 (426 otherwise).
+ * Shape mirrors the community zenProxy fixes (opencode2api#28, 9router#4105).
  *
  * Secrets: none here. A real Zen key (opencode.ai console, env-only) can
  * override the public bearer via `ZEN_API_KEY`.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 /** Bearer token Zen accepts for unauthenticated free-model calls. */
 export const OPENCODE_ZEN_PUBLIC_TOKEN = "public" as const;
 
-/** User-Agent the Zen gate recognizes as the public OpenCode CLI. */
+/** User-Agent the Zen gate recognizes as the public OpenCode CLI.
+ * Pinned above the 1.17.0 free-tier floor (see module docs). */
 export const OPENCODE_ZEN_USER_AGENT =
-  `opencode/1.15.9 ai-sdk/provider-utils/4.0.23 runtime/node/${process.versions.node}` as const;
+  `opencode/1.18.31 ai-sdk/provider-utils/4.0.23 runtime/node/${process.versions.node}` as const;
 
 const ID_ALPHABET =
   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-/** Random OpenCode-style id (`msg_<24>` / `ses_<24>`), fresh per request. */
-export function createOpenCodeId(prefix: "msg" | "ses"): string {
+/** Canonical session shape enforced upstream since 2026-09-16. */
+const CANONICAL_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
+
+const BASE62_ALPHABET =
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/** Fixed-width Base62 encoding of a big-endian byte string. */
+function base62Fixed(bytes: Uint8Array, width: number): string {
+  let n = BigInt(`0x${Buffer.from(bytes).toString("hex")}`);
+  let out = "";
+  for (let i = 0; i < width; i += 1) {
+    out = BASE62_ALPHABET[Number(n % 62n)] + out;
+    n /= 62n;
+  }
+  return out;
+}
+
+/**
+ * Canonical upstream session id: `ses_` + 12 lowercase hex + 14 Base62.
+ * Canonical input passes through (upstream prompt-cache affinity);
+ * anything else hashes deterministically into the shape so the same
+ * signal keeps a stable session. Default signal is random per call.
+ */
+export function createCanonicalSessionId(signal?: string): string {
+  if (signal !== undefined && CANONICAL_SESSION_RE.test(signal)) return signal;
+  const seed: string = signal ?? randomBytes(16).toString("hex");
+  const sum: Buffer = createHash("sha256").update(`ses\0${seed}`).digest();
+  return `ses_${sum.subarray(0, 6).toString("hex")}${base62Fixed(sum.subarray(6, 16), 14)}`;
+}
+
+/** Random OpenCode-style request id (`msg_<24>`), fresh per request. */
+export function createOpenCodeId(prefix: "msg"): string {
   const bytes: Buffer = randomBytes(24);
   let suffix = "";
   for (const byte of bytes) {
@@ -57,6 +87,6 @@ export function zenUpstreamHeaders(
     "X-Opencode-Client": "cli",
     "X-Opencode-Project": "global",
     "X-Opencode-Request": createOpenCodeId("msg"),
-    "X-Opencode-Session": createOpenCodeId("ses"),
+    "X-Opencode-Session": createCanonicalSessionId(),
   };
 }
