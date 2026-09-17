@@ -6,16 +6,19 @@
 import type { NormalizedModel } from "./fetcher.ts";
 
 export const BIG_PICKLE_ID = "big-pickle" as const;
+/** Stealth free model without the `-free` suffix (serves Anthropic-shape `/v1/messages`). */
+export const UNION_ALPHA_ID = "union-alpha" as const;
 
 /** Upstream catalog is the sole source of truth. Never a static list. */
 export const liveCatalogAuthoritative = true as const;
 
-/** `big-pickle` UNION `id.endsWith('-free')`. Case-insensitive, trimmed. */
+/** `big-pickle` + `union-alpha` UNION `id.endsWith('-free')`. Case-insensitive, trimmed. */
 export function isFreeModel(id: string): boolean {
   const trimmed: string = id.trim();
   if (trimmed.length === 0) return false;
   const lower: string = trimmed.toLowerCase();
   if (lower === BIG_PICKLE_ID) return true;
+  if (lower === UNION_ALPHA_ID) return true;
   return lower.endsWith("-free");
 }
 

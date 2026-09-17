@@ -5,6 +5,10 @@
  *   upstream Zen. Only the `oc/` model prefix is stripped; spark payloads
  *   are NOT translated. The upstream route follows format resolution
  *   (registry `targetFormat` > override > inbound shape).
+ * - `POST /v1/messages`: Anthropic-shape passthrough (union-alpha and
+ *   friends) to upstream `/zen/v1/messages`. Fixed route, no translation,
+ *   only `oc/` stripped; the client `anthropic-version` header is forwarded
+ *   when present. Same rotation, benches, and logging as the other routes.
  * - `GET /v1/models`: dual ids (`oc/<id>` + `<id>`) from the registry list
  *   populated by the autoparser at runtime.
  * - `GET /api/health`: liveness.
@@ -73,7 +77,10 @@ export interface ProxyLogEntry {
   readonly provenance: ErrorProvenance;
 }
 
-export type UpstreamPath = "/v1/chat/completions" | "/v1/responses";
+export type UpstreamPath =
+  | "/v1/chat/completions"
+  | "/v1/responses"
+  | "/v1/messages";
 
 export interface CreateAppOptions {
   readonly models?: readonly RegistryModel[];
@@ -191,13 +198,22 @@ export function createApp(options: CreateAppOptions = {}): Hono {
       parsedBody,
       c.req.header("accept") ?? null,
     );
-    const route = resolveRoute(model, { inboundShape, models });
-    const outgoing: string =
-      route === "/responses" && inboundShape === "chat"
+    // Messages-shape traffic (Anthropic API) pins a fixed upstream route:
+    // format resolution must not drag it onto /chat/completions.
+    const isMessages: boolean = inboundPath === "/v1/messages";
+    const route: string = isMessages
+      ? "/messages"
+      : resolveRoute(model, { inboundShape, models });
+    const outgoing: string = isMessages
+      ? rewriteModelBody(rawText)
+      : route === "/responses" && inboundShape === "chat"
         ? translateChatToResponses(rawText)
         : route === "/responses"
           ? sanitizeResponsesBody(rawText)
           : rewriteModelBody(rawText);
+    const anthropicVersion: string | undefined = isMessages
+      ? c.req.header("anthropic-version")
+      : undefined;
     const {
       res: upstream,
       attempts,
@@ -211,6 +227,9 @@ export function createApp(options: CreateAppOptions = {}): Hono {
         headers: {
           "Content-Type": "application/json",
           ...zenUpstreamHeaders({ apiKey: resolveZenApiKey() }),
+          ...(anthropicVersion === undefined
+            ? {}
+            : { "anthropic-version": anthropicVersion }),
         },
         body: outgoing,
       },
@@ -251,6 +270,8 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     handleUpstream(c, "/v1/chat/completions", "chat"),
   );
   app.post("/v1/responses", (c) => handleUpstream(c, "/v1/responses", "responses"));
+  // inboundShape is inert on the messages path (fixed upstream route).
+  app.post("/v1/messages", (c) => handleUpstream(c, "/v1/messages", "chat"));
 
   return app;
 }

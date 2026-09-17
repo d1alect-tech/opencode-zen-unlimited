@@ -38,6 +38,7 @@ Use these words consistently in code, tests, and docs:
 | rotation | Consecutive requests cycle over healthy egresses; 429s bench one and move on; any 200 lifts that egress bench (transient bursts self-heal) |
 | watcher | 429-watcher, polls usage logs with a cooldown |
 | autoparser | Live free-model poller feeding the registry |
+| messages | Anthropic-shape passthrough `POST /v1/messages` → upstream `/zen/v1/messages` (union-alpha); fixed route, `oc/` stripped, `anthropic-version` forwarded |
 
 If a new term appears, add it here in the same commit that introduces
 it.

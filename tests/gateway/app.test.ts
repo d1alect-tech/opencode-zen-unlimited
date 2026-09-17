@@ -373,3 +373,36 @@ describe("POST /api/pool/reset", () => {
     expect(body.healthy).toBe(1);
   });
 });
+
+describe("POST /v1/messages", () => {
+  test("union-alpha forwards verbatim to upstream /messages, strips only oc/ prefix", async () => {
+    const { captured, fetchImpl } = mockFetch(() =>
+      jsonResponse({ content: [] }),
+    );
+    const app = createApp({ models: MODELS, fetchImpl });
+    const inbound = {
+      model: "oc/union-alpha",
+      max_tokens: 10,
+      messages: [{ role: "user", content: "ping" }],
+    };
+    const res = await app.request("/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(inbound),
+    });
+    expect(res.status).toBe(200);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.url).toBe("https://opencode.ai/zen/v1/messages");
+    const sent = JSON.parse((captured[0]?.init.body as string) ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(sent).toEqual({ ...inbound, model: "union-alpha" });
+    expect(captured[0]?.init.headers).toMatchObject({
+      "anthropic-version": "2023-06-01",
+    });
+  });
+});

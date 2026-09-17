@@ -675,6 +675,36 @@ curl.exe -s --max-time 10 "http://localhost:20128/api/usage/proxy-logs?limit=3"
 ```
 
 The dashboard views (`/dashboard/providers/opencode` HTML, `/api/dashboard/providers/opencode` JSON) are read-only inspection, not configuration. Never put real keys in the provider block: `zen-keyless` above is a placeholder, not a credential.
+
+### Union Alpha (Anthropic shape, free preview)
+
+Union Alpha serves only the Anthropic Messages API, so it needs its own provider entry pointing at the gateway `/v1/messages` passthrough (same pool, same rotation, no translation):
+
+```jsonc
+"provider": {
+  "oc-union": {
+    "name": "OpenCode Union Free",
+    "npm": "@ai-sdk/anthropic",
+    "api": "http://localhost:20128/v1",
+    "options": {
+      "apiKey": "zen-keyless",
+      "timeout": 300000
+    },
+    "models": {
+      "union-alpha": { "name": "Union Alpha Free" }
+    }
+  }
+}
+```
+
+```powershell
+Set-Content body.json '{"model":"union-alpha","max_tokens":10,"messages":[{"role":"user","content":"ping"}]}'
+curl.exe -X POST http://localhost:20128/v1/messages -H "Content-Type: application/json" -d @body.json
+```
+
+```text
+# expected: 200 with Anthropic message output (or a provider 403/429 while the upstream free-tier gate is closed — same waves as spark, the pool self-heals)
+```
 ## Troubleshooting
 
 | Symptom | Cause and fix |

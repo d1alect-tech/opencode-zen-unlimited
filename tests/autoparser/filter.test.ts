@@ -17,6 +17,11 @@ describe("isFreeModel", () => {
     expect(isFreeModel("big-pickle")).toBe(true);
   });
 
+  test("keeps union-alpha (chat-shape 500 was wrong-endpoint artifact; it serves /v1/messages)", () => {
+    expect(isFreeModel("union-alpha")).toBe(true);
+    expect(isFreeModel("Union-Alpha")).toBe(true);
+  });
+
   test("keeps *-free ids", () => {
     expect(isFreeModel("muse-spark-1.3-contributor-free")).toBe(true);
     expect(isFreeModel("deepseek-v4-flash-free")).toBe(true);
@@ -34,6 +39,7 @@ describe("filterFreeModels", () => {
   test("keeps big-pickle + *-free, drops paid models", () => {
     const input: NormalizedModel[] = [
       m("big-pickle"),
+      m("union-alpha"),
       m("muse-spark-1.3-contributor-free"),
       m("deepseek-v4-flash-free"),
       m("gpt-4o"),
@@ -41,6 +47,7 @@ describe("filterFreeModels", () => {
     ];
     const ids: string[] = filterFreeModels(input).map((x) => x.id);
     expect(ids).toContain("big-pickle");
+    expect(ids).toContain("union-alpha");
     expect(ids).toContain("muse-spark-1.3-contributor-free");
     expect(ids).toContain("deepseek-v4-flash-free");
     expect(ids).not.toContain("gpt-4o");
