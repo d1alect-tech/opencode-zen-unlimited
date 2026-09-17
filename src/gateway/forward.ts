@@ -326,8 +326,11 @@ export function translateChatToResponses(rawText: string): string {
   return JSON.stringify(out);
 }
 
-/** Hop-by-hop headers that must never be forwarded 1:1. */
+/** Headers that must never be forwarded 1:1: hop-by-hop framing plus
+ * `content-encoding` (forwarded bodies are already decoded text — keeping
+ * the upstream `br` claim makes clients brotli-decode plain JSON). */
 const HOP_BY_HOP = new Set([
+  "content-encoding",
   "connection",
   "keep-alive",
   "proxy-authenticate",

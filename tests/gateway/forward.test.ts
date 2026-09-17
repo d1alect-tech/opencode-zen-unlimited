@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  bufferedPassthrough,
+  pickForwardHeaders,
   resolveRoute,
   sanitizeResponsesBody,
   stripOcPrefix,
@@ -244,5 +246,37 @@ describe("wantsStreaming", () => {
   test("no stream flags means buffered", () => {
     expect(wantsStreaming({}, "application/json")).toBe(false);
     expect(wantsStreaming({}, null)).toBe(false);
+  });
+});
+
+describe("pickForwardHeaders", () => {
+  test("drops content-encoding: decoded bodies must not claim br", () => {
+    const upstream = new Headers({
+      "Content-Type": "application/json",
+      "Content-Encoding": "br",
+      "Content-Length": "151",
+      "x-request-id": "req-1",
+    });
+    const out = pickForwardHeaders(upstream);
+    expect(out.get("content-encoding")).toBeNull();
+    expect(out.get("content-length")).toBeNull();
+    expect(out.get("content-type")).toBe("application/json");
+    expect(out.get("x-request-id")).toBe("req-1");
+  });
+});
+
+describe("bufferedPassthrough", () => {
+  test("does not forward content-encoding with the decoded body", async () => {
+    const upstream = new Response('{"a":1}', {
+      status: 403,
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Encoding": "br",
+      },
+    });
+    const res = await bufferedPassthrough(upstream);
+    expect(res.status).toBe(403);
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(await res.text()).toBe('{"a":1}');
   });
 });
