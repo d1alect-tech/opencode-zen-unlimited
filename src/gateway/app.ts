@@ -47,6 +47,7 @@ import {
   rewriteModelBody,
   sanitizeResponsesBody,
   stripOcPrefix,
+  translateChatToResponses,
   wantsStreaming,
   type FetchImpl,
   type UpstreamRequestInit,
@@ -62,7 +63,6 @@ import {
   type ErrorProvenance,
   fetchWithRotation,
 } from "./rotation";
-import { translateChatToResponses } from "./forward";
 import { buildOpencodeProvider, renderOpencodePage } from "./dashboard";
 
 export interface ProxyLogEntry {
