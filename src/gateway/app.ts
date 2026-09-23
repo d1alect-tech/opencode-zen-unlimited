@@ -62,6 +62,7 @@ import {
   createRotationPool,
   type ErrorProvenance,
   fetchWithRotation,
+  type RotationPool,
 } from "./rotation";
 import { buildOpencodeProvider, renderOpencodePage } from "./dashboard";
 
@@ -87,6 +88,8 @@ export interface CreateAppOptions {
   readonly upstreamBase?: string;
   readonly fetchImpl?: FetchImpl;
   readonly egresses?: readonly string[];
+  /** Shared pool override (tests, embedding); defaults to a fresh pool over `egresses`. */
+  readonly pool?: RotationPool;
 }
 
 const MAX_LOG_ENTRIES = 500;
@@ -135,7 +138,7 @@ export function createApp(options: CreateAppOptions = {}): Hono {
   const fetchImpl: FetchImpl = options.fetchImpl ?? defaultFetchImpl();
   const egresses: readonly string[] =
     options.egresses ?? parseEgressUpstreams();
-  const pool = createRotationPool(egresses);
+  const pool: RotationPool = options.pool ?? createRotationPool(egresses);
   const dispatcherFor =
     egresses.length === 0 || isLoopbackBase(upstreamBase)
       ? undefined

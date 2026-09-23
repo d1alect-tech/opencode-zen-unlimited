@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createApp } from "@/gateway/app";
 import type { UpstreamRequestInit } from "@/gateway/forward";
 import { fetchUpstream } from "@/gateway/sse";
+import { createRotationPool } from "@/gateway/rotation";
 import type { RegistryModel } from "@/registry/types";
 
 const MODELS: readonly RegistryModel[] = [
@@ -302,6 +303,20 @@ describe("GET /api/usage/proxy-logs", () => {
 });
 
 describe("GET /api/pool", () => {
+  test("uses an injected pool (DI) instead of building its own", async () => {
+    const pool = createRotationPool(["http://127.0.0.1:18081"]);
+    pool.bench("http://127.0.0.1:18081", 60_000);
+    const app = createApp({
+      models: MODELS,
+      egresses: ["http://127.0.0.1:18081"],
+      fetchImpl: () => Promise.resolve(new Response("x")),
+      pool,
+    });
+    const res = await app.request("/api/pool");
+    const body = (await res.json()) as { healthy: number };
+    expect(body.healthy).toBe(0);
+  });
+
   test("lists per-egress bench state", async () => {
     const app = createApp({
       models: MODELS,
