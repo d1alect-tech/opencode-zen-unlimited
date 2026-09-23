@@ -42,26 +42,51 @@ describe("doctor checks batch B: closed port fails, never throws", () => {
   });
 });
 
-describe("doctor checks batch B: stale pidfile fails with fixHint", () => {
-  test("service:relay stale pidfile -> fail with fixHint", async () => {
-    const checks = createChecksB({ readPidFn: () => null });
+describe("doctor checks batch B: services are port-probed (pidfile is supplementary)", () => {
+  test("service:relay stale pidfile + closed port -> fail with fixHint", async () => {
+    const checks = createChecksB({ readPidFn: () => null, tcpProbe: async () => false });
     const results = await collectResults(checks.filter((c) => c.id === "service:relay"));
     expect(results[0]?.result).toBe("fail");
     expect(results[0]?.fixHint?.length ?? 0).toBeGreaterThan(0);
   });
 
-  test("service:sing-box live pid -> pass", async () => {
-    expect((await find("service:sing-box", { readPidFn: () => 1234 }).run()).result).toBe("pass");
+  test("service:relay open port without pidfile -> pass (scheduler-run)", async () => {
+    const checks = createChecksB({ readPidFn: () => null, tcpProbe: async () => true });
+    const results = await collectResults(checks.filter((c) => c.id === "service:relay"));
+    expect(results[0]?.result).toBe("pass");
+  });
+
+  test("service:sing-box live pid + open port -> pass", async () => {
+    expect(
+      (await find("service:sing-box", { readPidFn: () => 1234, tcpProbe: async () => true }).run()).result,
+    ).toBe("pass");
+  });
+
+  test("service:sing-box open port without pidfile -> pass (scheduler-run)", async () => {
+    expect(
+      (await find("service:sing-box", { readPidFn: () => null, tcpProbe: async () => true }).run()).result,
+    ).toBe("pass");
   });
 
   test("service:sing-box status-spawned alias slot -> pass", async () => {
     const readPidFn = (_dir: string, slot: string): number | null => (slot === "singbox" ? 1234 : null);
-    expect((await find("service:sing-box", { readPidFn }).run()).result).toBe("pass");
+    expect(
+      (await find("service:sing-box", { readPidFn, tcpProbe: async () => true }).run()).result,
+    ).toBe("pass");
   });
 
   test("service:gateway pid alive + /api/health ok -> pass", async () => {
     const checks = createChecksB({
       readPidFn: () => 1234,
+      fetchImpl: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    });
+    const results = await collectResults(checks.filter((c) => c.id === "service:gateway"));
+    expect(results[0]?.result).toBe("pass");
+  });
+
+  test("service:gateway health ok without pidfile -> pass (scheduler-run)", async () => {
+    const checks = createChecksB({
+      readPidFn: () => null,
       fetchImpl: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
     });
     const results = await collectResults(checks.filter((c) => c.id === "service:gateway"));

@@ -2,10 +2,13 @@
  * `zen status [--json] [--self-heal] [--verbose]` (plan T7).
  *
  * Prints one row per managed proc (singbox | relay | gateway):
- * liveness comes from the pidfile (`readPid`, stale entries count as
- * dead), plus a per-proc health extra — gateway probes `/api/health`,
- * relay probes TCP :1090, sing-box is process-only. Uptime derives from
- * the pidfile mtime. `--json` emits the machine shape
+ * liveness is port-probed first (sing-box :1081, relay :1090, gateway
+ * /api/health) because scheduler-run processes never write pidfiles —
+ * the pidfile only supplies the pid/uptime for display. Port-open with
+ * no pidfile means "externally managed" and is alive, never re-spawned.
+ * Gateway dead-but-port-held is NOT re-spawned (a hung or foreign
+ * listener would make the spawn die on bind anyway).
+ * `--json` emits the machine shape
  * `{ok, services:[{name,alive,pid,uptimeMs,detail}]}`.
  *
  * `--self-heal` restarts dead procs through `spawnDetached` (same entry
@@ -36,6 +39,8 @@ export const STATUS_PROBE_TIMEOUT_MS = 3000;
 
 const GATEWAY_BASE = "http://127.0.0.1:20128";
 const RELAY_PORT = 1090;
+/** First sing-box SOCKS inbound (config convention :1081..; one open port proves the process). */
+const SINGBOX_PORT = 1081;
 
 /** Legacy pidfile slot written by older tooling (doctor uses `sing-box`). */
 const SINGBOX_ALIASES: readonly string[] = ["singbox", "sing-box"];
@@ -154,44 +159,72 @@ function resolveSlot(deps: LiveDeps, name: StatusService): { pid: number | null;
   return { pid: deps.readPidFn(deps.pidDir, name), slot: name };
 }
 
-async function checkService(deps: LiveDeps, name: StatusService): Promise<ServiceStatus> {
+/** Port the gateway should listen on, derived from its base URL. */
+function gatewayPort(base: string): number {
+  try {
+    const port = Number(new URL(base).port);
+    if (Number.isInteger(port) && port > 0) return port;
+  } catch {
+    // fall through to the default
+  }
+  return 20128;
+}
+
+async function tcpOpen(deps: LiveDeps, port: number): Promise<boolean> {
+  try {
+    return await deps.tcpProbe("127.0.0.1", port, STATUS_PROBE_TIMEOUT_MS);
+  } catch {
+    return false;
+  }
+}
+
+interface Checked {
+  readonly status: ServiceStatus;
+  /** False when the port is held by something we must not displace. */
+  readonly healable: boolean;
+}
+
+async function checkService(deps: LiveDeps, name: StatusService): Promise<Checked> {
   const { pid, slot } = resolveSlot(deps, name);
-  if (pid === null) {
-    return { name, alive: false, pid: null, uptimeMs: null, detail: "pidfile missing or stale" };
-  }
-  const mtime = pidMtimeMs(deps.pidDir, slot);
+  const mtime = pid === null ? null : pidMtimeMs(deps.pidDir, slot);
   const uptimeMs = mtime === null ? null : Math.max(0, Math.round(deps.now() - mtime));
-  if (name === "singbox") {
-    return { name, alive: true, pid, uptimeMs, detail: `pid ${pid} alive` };
-  }
-  if (name === "relay") {
-    let open = false;
-    try {
-      open = await deps.tcpProbe("127.0.0.1", RELAY_PORT, STATUS_PROBE_TIMEOUT_MS);
-    } catch {
-      open = false;
+  const pidNote = pid === null ? "no pidfile (externally managed)" : `pid ${pid}`;
+
+  if (name !== "gateway") {
+    const port = name === "singbox" ? SINGBOX_PORT : RELAY_PORT;
+    const open = await tcpOpen(deps, port);
+    if (open) {
+      return {
+        status: { name, alive: true, pid, uptimeMs, detail: `${pidNote}, :${port} open` },
+        healable: false,
+      };
     }
-    return {
-      name,
-      alive: true,
-      pid,
-      uptimeMs,
-      detail: open ? `pid ${pid} alive, :${RELAY_PORT} open` : `pid ${pid} alive, :${RELAY_PORT} closed`,
-    };
+    const detail =
+      pid === null ? `:${port} closed` : `pid ${pid} alive but :${port} closed (hung)`;
+    return { status: { name, alive: false, pid, uptimeMs, detail }, healable: true };
   }
+
+  const port = gatewayPort(deps.gatewayBase);
+  let healthOk = false;
+  let healthDetail: string;
   try {
     const res = await fetchWithTimeout(deps.fetchImpl, `${deps.gatewayBase}/api/health`);
-    return {
-      name,
-      alive: true,
-      pid,
-      uptimeMs,
-      detail: res.ok ? `pid ${pid} alive, /api/health ok` : `pid ${pid} alive, /api/health -> HTTP ${res.status}`,
-    };
+    healthOk = res.ok;
+    healthDetail = res.ok ? "/api/health ok" : `/api/health -> HTTP ${res.status}`;
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return { name, alive: true, pid, uptimeMs, detail: `pid ${pid} alive, /api/health unreachable: ${reason}` };
+    healthDetail = `/api/health unreachable: ${err instanceof Error ? err.message : String(err)}`;
   }
+  if (healthOk) {
+    return {
+      status: { name, alive: true, pid, uptimeMs, detail: `${pidNote}, ${healthDetail}` },
+      healable: false,
+    };
+  }
+  const held = await tcpOpen(deps, port);
+  const detail = held
+    ? `${healthDetail}, :${port} held (hung or foreign process)`
+    : healthDetail;
+  return { status: { name, alive: false, pid, uptimeMs, detail }, healable: !held };
 }
 
 function formatUptime(uptimeMs: number | null): string {
@@ -287,8 +320,11 @@ export async function runStatus(rest: readonly string[], deps?: StatusDeps): Pro
   };
 
   const statuses: ServiceStatus[] = [];
+  const healable = new Map<StatusService, boolean>();
   for (const name of STATUS_SERVICES) {
-    statuses.push(await checkService(live, name));
+    const checked = await checkService(live, name);
+    statuses.push(checked.status);
+    healable.set(name, checked.healable);
   }
 
   const healed: string[] = [];
@@ -302,6 +338,10 @@ export async function runStatus(rest: readonly string[], deps?: StatusDeps): Pro
         notifyFn(st.name, lines);
       } catch {
         // notify is best-effort; a toast failure must not block the heal.
+      }
+      if (healable.get(st.name) === false) {
+        failed.push(`skipped ${st.name}: port held by a hung or foreign process`);
+        continue;
       }
       try {
         const spec = specs[st.name];

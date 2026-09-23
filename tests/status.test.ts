@@ -141,6 +141,64 @@ describe("zen status command", () => {
     expect(r.out).toMatch(/failed gateway/);
   });
 
+  test("port open without pidfile -> alive rows, exit 0 (scheduler-run stack)", async () => {
+    const r = await capture(() =>
+      runStatus([], {
+        pidDir: tmp(),
+        logDir: tmp(),
+        tcpProbe: async () => true,
+        fetchImpl: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      }),
+    );
+    expect(r.code).toBe(0);
+    for (const name of ["singbox", "relay", "gateway"]) {
+      expect(r.out).toMatch(new RegExp(`${name}\\s+alive`));
+    }
+  });
+
+  test("--self-heal spawns nothing when ports open but pidfiles missing", async () => {
+    const spawned: string[] = [];
+    const r = await capture(() =>
+      runStatus(["--self-heal"], {
+        pidDir: tmp(),
+        logDir: tmp(),
+        tcpProbe: async () => true,
+        fetchImpl: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+        spawnFn: (_cmd, _args, opts) => {
+          spawned.push(opts.name);
+          return 4242;
+        },
+        notifyFn: () => {},
+      }),
+    );
+    expect(r.code).toBe(0);
+    expect(spawned).toHaveLength(0);
+    expect(r.out).not.toContain("healed");
+  });
+
+  test("gateway port held but health failing -> dead, NOT re-spawned", async () => {
+    const spawned: string[] = [];
+    const r = await capture(() =>
+      runStatus(["--self-heal"], {
+        pidDir: tmp(),
+        logDir: tmp(),
+        tcpProbe: async (_host, port) => port === 20128,
+        fetchImpl: async () => {
+          throw new Error("socket hangup");
+        },
+        spawnFn: (_cmd, _args, opts) => {
+          spawned.push(opts.name);
+          return 4242;
+        },
+        notifyFn: () => {},
+      }),
+    );
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/gateway\s+dead/);
+    expect(spawned.sort()).toEqual(["relay", "singbox"]);
+    expect(r.out).not.toContain("healed gateway");
+  });
+
   test("unknown flag -> exit 2 with usage", async () => {
     const r = await capture(() => runStatus(["--nope"], { pidDir: tmp(), logDir: tmp() }));
     expect(r.code).toBe(2);

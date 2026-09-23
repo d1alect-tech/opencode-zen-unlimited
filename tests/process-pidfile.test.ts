@@ -25,6 +25,17 @@ describe("pidfile stale handling", () => {
     expect(isAlive(process.pid)).toBe(true);
   });
 
+  test("EPERM means alive-but-unowned: pid 4 stays, pidfile kept", () => {
+    // PID 4 (System) exists on every Windows box but is never signalable
+    // from user space: process.kill(pid, 0) throws EPERM, not ESRCH.
+    // That must count as alive — deleting the pidfile here is what made
+    // `zen status` report dead for healthy SYSTEM-stack processes.
+    expect(isAlive(4)).toBe(true);
+    const dir = tmp();
+    writePid(dir, "gateway", 4);
+    expect(readPid(dir, "gateway")).toBe(4);
+  });
+
   test("garbage content treated as free", () => {
     const dir = tmp();
     writeFileSync(join(dir, "relay.pid"), "not-a-pid\n", "utf8");

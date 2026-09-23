@@ -1,11 +1,12 @@
 /**
  * Doctor checks batch B (plan T6): slow/live checks.
  *
- * Ports (TCP connect), services (pidfile + gateway /api/health),
- * zen-endpoint (full chain GET /v1/models expecting oc/ ids), and
- * scheduler (schtasks oc-* tasks, warn-only). Every probe has a
- * <=3s timeout; offline services fail with a fixHint and never throw
- * (the framework isolates throws anyway).
+ * Ports (TCP connect), services (port probe is the source of truth —
+ * scheduler-run processes never write pidfiles, so the pidfile only
+ * enriches the detail line), zen-endpoint (full chain GET /v1/models
+ * expecting oc/ ids), and scheduler (schtasks oc-* tasks, warn-only).
+ * Every probe has a <=3s timeout; offline services fail with a fixHint
+ * and never throw (the framework isolates throws anyway).
  */
 import { Socket } from "node:net";
 import { readPid, resolvePidDir } from "../process/pidfile.ts";
@@ -15,6 +16,9 @@ import type { Check, CheckOutcome } from "./doctor-framework.ts";
 export const PROBE_TIMEOUT_MS = 3000;
 
 const GATEWAY_BASE = "http://127.0.0.1:20128";
+/** First sing-box SOCKS inbound (config convention :1081..). */
+const SINGBOX_PORT = 1081;
+const RELAY_PORT = 1090;
 const TASK_NAMES: readonly string[] = ["oc-singbox", "oc-relay", "oc-gateway"];
 
 export interface ChecksBDeps {
@@ -98,18 +102,52 @@ function portCheck(
 }
 
 /** pidfile slots to try in order — status spawns `singbox`, legacy tooling `sing-box`. */
-function pidCheck(
+function firstAlivePid(
   deps: Required<Pick<ChecksBDeps, "pidDir" | "readPidFn">>,
-  ...slots: [string, ...string[]]
-): CheckOutcome {
+  ...slots: readonly string[]
+): number | null {
   for (const slot of slots) {
     const pid = deps.readPidFn(deps.pidDir, slot);
-    if (pid !== null) return { result: "pass", detail: `${slot} pid ${pid} alive` };
+    if (pid !== null) return pid;
   }
+  return null;
+}
+
+/**
+ * Service liveness = its port answers. Scheduler-run (SYSTEM) processes
+ * never write pidfiles, so a pidfile-gated check reports healthy services
+ * as dead; the pid only enriches the detail string when present.
+ */
+function portServiceCheck(
+  deps: Required<Pick<ChecksBDeps, "tcpProbe" | "pidDir" | "readPidFn">>,
+  service: string,
+  port: number,
+  slots: readonly string[],
+): Check {
   return {
-    result: "fail",
-    detail: `${slots[0]} pidfile missing or stale`,
-    fixHint: "start services (order: sing-box, relay, gateway) or run 'zen setup'",
+    id: `service:${service}`,
+    group: "Services",
+    run: async (): Promise<CheckOutcome> => {
+      let open = false;
+      try {
+        open = await deps.tcpProbe("127.0.0.1", port, PROBE_TIMEOUT_MS);
+      } catch {
+        open = false;
+      }
+      const pid = firstAlivePid(deps, ...slots);
+      const pidNote = pid === null ? "externally managed" : `pid ${pid} alive`;
+      if (open) {
+        return { result: "pass", detail: `${service} ${pidNote}, :${port} open` };
+      }
+      return {
+        result: "fail",
+        detail:
+          pid === null
+            ? `${service} not listening on 127.0.0.1:${port}`
+            : `${service} pid ${pid} alive but :${port} closed (hung)`,
+        fixHint: "start services (order: sing-box, relay, gateway) or run 'zen setup'",
+      };
+    },
   };
 }
 
@@ -139,25 +177,17 @@ export function createChecksB(deps: ChecksBDeps = {}): Check[] {
   const port1090 = portCheck({ tcpProbe }, 1090, "relay");
   const port20128 = portCheck({ tcpProbe }, 20128, "gateway");
 
-  const singBox: Check = {
-    id: "service:sing-box",
-    group: "Services",
-    run: (): CheckOutcome => pidCheck(bound, "sing-box", "singbox"),
-  };
-  const relay: Check = {
-    id: "service:relay",
-    group: "Services",
-    run: (): CheckOutcome => pidCheck(bound, "relay"),
-  };
+  const singBox: Check = portServiceCheck(bound, "sing-box", SINGBOX_PORT, ["sing-box", "singbox"]);
+  const relay: Check = portServiceCheck(bound, "relay", RELAY_PORT, ["relay"]);
   const gateway: Check = {
     id: "service:gateway",
     group: "Services",
     run: async (): Promise<CheckOutcome> => {
-      const pid = pidCheck(bound, "gateway");
-      if (pid.result === "fail") return pid;
+      const pid = firstAlivePid(bound, "gateway");
+      const pidNote = pid === null ? "externally managed" : `pid ${pid} alive`;
       try {
         const res = await fetchWithTimeout(fetchImpl, `${gatewayBase}/api/health`);
-        if (res.ok) return { result: "pass", detail: "gateway pid alive, /api/health ok" };
+        if (res.ok) return { result: "pass", detail: `gateway ${pidNote}, /api/health ok` };
         return {
           result: "fail",
           detail: `gateway /api/health -> HTTP ${res.status}`,

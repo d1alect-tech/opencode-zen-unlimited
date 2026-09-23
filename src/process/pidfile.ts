@@ -13,14 +13,22 @@ export function pidPath(dir: string, name: string): string {
   return join(dir, `${name}.pid`);
 }
 
-/** True when a process with this pid exists (signal 0 probe). */
+/**
+ * True when a process with this pid exists (signal 0 probe).
+ * EPERM means alive-but-unowned (e.g. a SYSTEM-stack process probed
+ * from user space): the kernel found the pid and refused the signal,
+ * which only happens when there IS a process. Only ESRCH (no such
+ * process) — plus invalid pids — counts as dead.
+ */
 export function isAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    const code: unknown =
+      typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
+    return code === "EPERM";
   }
 }
 
